@@ -148,119 +148,118 @@ $$\eta_t = \begin{cases} \eta_{\max} \cdot \frac{t}{T_{\text{warmup}}}, & t \le 
 
 ![Cosine Learning Rate Schedule with Warmup](cosine_lr_diagram.png)
 
-### 2.4 Optimizer Selection: `adamw_torch_fused` vs `adamw_8bit`
-Across our primary high-performance training runs, we utilize **`adamw_torch_fused`**:
-1. **`adamw_torch_fused`**: Fuses point-wise AdamW parameter and momentum update steps into a single CUDA kernel invocation. This eliminates intermediate GPU memory read/write cycles between PyTorch operators, maximizing GPU compute utility on A100.
-2. **`adamw_8bit` (bitsandbytes)**: Quantizes 32-bit Adam first-moment ($m_t$) and second-moment ($v_t$) states to 8-bit block-wise representations, reducing optimizer memory overhead by 75%.
+---
+
+## 3. Reinforcement Learning via GRPO: Complete Step-by-Step Intuition & Mathematical Walkthrough
+
+### 3.1 The Fundamental Goal of GRPO
+In Supervised Fine-Tuning (SFT), a human provides exact target text for the model to copy. In Reinforcement Learning (RL), the model must **explore and discover reasoning trajectories on its own**.
+
+**The Job of GRPO**: Train the model to maximize verified reward (correct logic, strict formatting, correct answers) **while constraining weight updates to be as conservative as possible** to prevent policy collapse and reward hacking.
+
+To build complete mathematical and mechanical intuition, we carry **one concrete running example** through every step of the GRPO algorithm below.
 
 ---
 
-## 3. Reinforcement Learning via GRPO (Group Relative Policy Optimization)
+### 3.2 Running Example Setup
+- **Input Prompt ($x$)**: `"If a train travels 120 km in 1.5 hours, what is its speed in m/s?"`
+- **Ground Truth Target**: Speed in km/h = $\frac{120}{1.5} = 80 \text{ km/h}$. Converted to m/s: $80 \times \frac{1000}{3600} = 22.22 \text{ m/s}$.
+- **Group Size ($G=4$)**: For this prompt, the model samples $G=4$ completion rollouts $\{y_1, y_2, y_3, y_4\}$:
 
-### 3.1 Mathematical Theory & Advantage Calculation
-Group Relative Policy Optimization (GRPO) simplifies reinforcement learning by sampling a group of $G$ candidate outputs $\{y_1, y_2, \ldots, y_G\}$ for each input prompt $x$ from the current policy $\pi_{\theta_{\text{old}}}$. 
+```
+y1 (Perfect CoT & Answer):
+"<think>Speed = 120 / 1.5 = 80 km/h. To convert to m/s: 80 * (5/18) = 22.22 m/s.</think><answer>22.22 m/s</answer>"
 
-For each completion $y_i$, GRPO evaluates a composite scalar reward score $R_i$ and computes baseline-normalized advantages across the sampled group:
+y2 (Incomplete: stopped at km/h):
+"<think>Speed = 120 / 1.5 = 80 km/h.</think><answer>80</answer>"
 
-$$A_i = \frac{R_i - \mu(R_1, \ldots, R_G)}{\sigma(R_1, \ldots, R_G) + \epsilon}$$
+y3 (Correct Answer, Missing <think> tags):
+"22.22 m/s"
 
-where $\mu$ is the group reward mean, $\sigma$ is the standard deviation, and $\epsilon = 10^{-4}$ ensures numerical stability.
-
-### 3.2 DAPO Loss Objective with Asymmetric Clipping
-The model parameters $\theta$ are updated by minimizing the Dynamic Advantage Policy Optimization (DAPO) clipped objective:
-
-$$\mathcal{L}_{\text{GRPO}}(\theta) = -\frac{1}{G} \sum_{i=1}^{G} \frac{1}{|y_i|} \sum_{t=1}^{|y_i|} \left[ \min \left( r_{i,t}(\theta) A_i, \; \text{clip}(r_{i,t}(\theta), 1 - \epsilon_{\text{low}}, 1 + \epsilon_{\text{high}}) A_i \right) \right] + \beta D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$$
-
-where:
-- **Probability Ratio**: $r_{i,t}(\theta) = \frac{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})}{\pi_{\theta_{\text{old}}}(y_{i,t} \mid x, y_{i,\lt t})}$
-- **Asymmetric Clipping bounds**: $\epsilon_{\text{low}} = 0.2$ and $\epsilon_{\text{high}} = 0.28$. Asymmetric clipping allows the policy to take larger gradient steps when discovering positive high-advantage completions while restricting negative updates.
-- **Schulman Per-Token KL Divergence Penalty**:
-$$D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - \log \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - 1$$
-
-### 3.3 Detailed Variable Breakdown of `GRPOConfig` Parameters
-
-```python
-from trl import GRPOConfig, GRPOTrainer
-
-training_args = GRPOConfig(
-    output_dir                  = "/root/grpo_output",
-    num_generations             = 8,
-    max_prompt_length           = 1024,
-    max_completion_length       = 1536,
-    temperature                 = 0.9,
-    top_p                       = 0.95,
-    learning_rate               = 5e-6,
-    lr_scheduler_type           = "cosine",
-    warmup_ratio                = 0.05,
-    max_steps                   = 600,
-    per_device_train_batch_size = 4,
-    gradient_accumulation_steps = 4,
-    loss_type                   = "dapo",
-    epsilon                     = 0.2,
-    epsilon_high                = 0.28,
-    beta                        = 0.001,
-    mask_truncated_completions  = True,
-    bf16                        = True,
-    optim                       = "adamw_torch_fused",
-)
+y4 (Complete Hallucination):
+"<think>120 * 1.5 = 180 m/s</think><answer>180 m/s</answer>"
 ```
 
-#### Complete Narrative Parameter Descriptions:
-- **`output_dir`**: The target directory path on disk where intermediate LoRA checkpoints, training logs, and merged models are saved.
-- **`num_generations` ($G=8$)**: The group size $G$. Controls how many independent output completions are sampled per input prompt to compute relative group advantage $A_i$.
-- **`max_prompt_length` (1024)**: Truncates user input prompts exceeding 1024 tokens to conserve VRAM during generation.
-- **`max_completion_length` (1536)**: Caps generated rollout responses at 1536 tokens, providing sufficient budget for deep Chain-of-Thought (CoT) reasoning.
-- **`temperature` (0.9)**: Sampling temperature used during rollout generation. A value of 0.9 encourages diverse exploration of reasoning strategies.
-- **`top_p` (0.95)**: Nucleus sampling threshold restricting sampling to the top 95% cumulative probability token mass.
-- **`learning_rate` ($5 \times 10^{-6}$)**: Peak learning rate for policy gradient updates. Set conservatively low to maintain RL policy stability.
-- **`lr_scheduler_type` ("cosine")**: Decay schedule decreasing the learning rate smoothly following a cosine curve over 600 steps.
-- **`warmup_ratio` (0.05)**: Linear warmup phase covering the first 5% of training steps (30 steps).
-- **`max_steps` (600)**: Total number of RL optimizer steps executed during training.
-- **`per_device_train_batch_size` (4)**: Micro-batch size of prompts loaded into VRAM per GPU generation call.
-- **`gradient_accumulation_steps` (4)**: Accumulates gradients across 4 micro-batches ($4 \times 4 = 16$ effective prompt batch size).
-- **`loss_type` ("dapo")**: Enables Dynamic Advantage Policy Optimization with asymmetric ratio clipping.
-- **`epsilon` (0.2)**: Lower clipping threshold $\epsilon_{\text{low}}$ limiting negative ratio updates.
-- **`epsilon_high` (0.28)**: Upper clipping threshold $\epsilon_{\text{high}}$ allowing positive advantage rewards to scale further.
-- **`beta` (0.001)**: Scaling coefficient for the KL divergence penalty term $D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$.
-- **`mask_truncated_completions` (True)**: Prevents incomplete outputs that reach `max_completion_length` without an EOS token from corrupting policy gradients.
-- **`bf16` (True)**: Enables 16-bit BFloat16 execution on NVIDIA Ampere GPUs.
-- **`optim` ("adamw_torch_fused")**: Fused AdamW optimizer used for fast step updates.
+---
 
-### 3.4 In-Depth Technical Explanations of the 4 Custom Reward Functions
+### 3.3 Step 1: Multi-Reward Evaluation ($R_i$)
+Each generated rollout $y_i$ is evaluated by our 4 domain-aware reward functions (`format_reward`, `correctness_reward`, `instruction_reward`, `length_reward`):
 
-Our GRPO pipeline utilizes 4 domain-aware reward functions to guide model behavior across structure, factual accuracy, instruction compliance, and sequence length.
+- **Completion $y_1$**: Exact XML tags (+0.50) + Factual correctness (+1.00) $\implies \mathbf{R_1 = +1.50}$
+- **Completion $y_2$**: Exact XML tags (+0.40) + Wrong unit answer (-0.50) $\implies \mathbf{R_2 = -0.10}$
+- **Completion $y_3$**: Missing tags (-0.50) + Factual correctness (+1.00) $\implies \mathbf{R_3 = +0.50}$
+- **Completion $y_4$**: Valid tags (+0.20) + Wrong answer (-0.50) $\implies \mathbf{R_4 = -0.30}$
 
-#### Reward 1: `format_reward` (Structural CoT & Tag Enforcement)
-- **Technical Purpose**: Enforces strict XML structural tags (`<think>...</think>` and `<answer>...</answer>`) and penalizes model responses that skip Chain-of-Thought reasoning.
-- **Scoring Mechanics**:
-  - Checks if `<think>` and `</think>` tags are both present. If present, awards $+0.20$.
-  - Extracts text inside `<think>...</think>`. If reasoning length is $\ge 50$ words, awards an additional $+0.15$ for substantive reasoning. If missing, penalizes $-0.15$.
-  - Checks if `<answer>` and `</answer>` tags are present. Awards $+0.15$ for tags and $+0.10$ if answer content is non-empty. Penalizes $-0.15$ if missing.
+**Raw Reward Vector**: $\mathbf{R = \{+1.50, \; -0.10, \; +0.50, \; -0.30\}}$
 
-#### Reward 2: `correctness_reward` (Domain-Routed Correctness)
-- **Technical Purpose**: Evaluates factual correctness based on the ground-truth target and domain `answer_type`.
-- **Scoring Mechanics**:
-  - **Numeric Domain (`numeric`)**: Extracts numerical values using regular expressions `\d+(\.\d+)?` and compares prediction against ground truth within a tolerance of $1 \times 10^{-3}$ (also evaluating fraction equivalences like $1/2 = 0.5$). Awards $+1.0$ if correct, $-0.5$ if wrong.
-  - **Exact / MCQ Domain (`exact`)**: Extracts candidate uppercase letters (`A`, `B`, `C`, `D`) for multiple-choice questions. Awards $+1.0$ for exact match, $-0.5$ for incorrect option selection.
-  - **Boolean Domain (`bool`)**: Normalizes responses to `"yes"` or `"no"`. Awards $+1.0$ for matching truth, $-0.5$ otherwise.
-  - **Code Domain (`code`)**: Analyzes python code structure for function declarations (`def`), return statements (`return`), and 4-space indentation. Awards proportional scores up to $+0.60$.
+---
 
-#### Reward 3: `instruction_reward` (Alpaca Word Count Adherence)
-- **Technical Purpose**: Ensures model compliance with explicit formatting instructions (such as target word counts) in instruction prompts.
-- **Scoring Mechanics**:
-  - Filters samples originating from the `alpaca` source.
-  - Parses target word count constraints from prompts using regex (e.g., *"in 50 words"*).
-  - Calculates length difference $|N_{\text{actual}} - N_{\text{target}}|$. Awards $+1.0$ if within 12% tolerance, $-0.5$ if constraint is violated.
+### 3.4 Step 2: Group Baseline & Relative Advantage Calculation ($A_i$)
+GRPO **eliminates the need for a separate Critic / Value Model** (saving 50% VRAM) by using the group itself as a baseline benchmark.
 
-#### Reward 4: `length_reward` (Degenerate Output Guard)
-- **Technical Purpose**: Serves as a guardrail preventing policy degeneration into single-word cop-outs or infinite repetitive loops.
-- **Scoring Mechanics**:
-  - Computes total word count $W$.
-  - If $W < 15$ words (under-reasoning): penalizes $-0.5$.
-  - If $W > 2500$ words (runaway generation): penalizes $-0.25$.
-  - If $15 \le W \le 2500$ words: awards $+0.15$ bonus.
+#### 1. Calculate Group Mean ($\mu$) and Standard Deviation ($\sigma$):
+$$\mu = \frac{+1.50 - 0.10 + 0.50 - 0.30}{4} = \mathbf{+0.40}$$
+$$\sigma = \sqrt{\frac{(1.50-0.40)^2 + (-0.10-0.40)^2 + (0.50-0.40)^2 + (-0.30-0.40)^2}{4}} \approx \mathbf{0.70}$$
 
-### 3.5 Reward Hacking: Mechanics, Observed Vulnerabilities, and Production Mitigations in Our GRPO Pipeline
+#### 2. Compute Relative Group Advantage ($A_i = \frac{R_i - \mu}{\sigma + \epsilon}$):
+- **$A_1$ (Completion $y_1$)**: $\frac{1.50 - 0.40}{0.70} = \mathbf{+1.57}$ $\implies$ **Above Average! (Positive Reinforcement)**
+- **$A_2$ (Completion $y_2$)**: $\frac{-0.10 - 0.40}{0.70} = \mathbf{-0.71}$ $\implies$ **Below Average! (Negative Suppression)**
+- **$A_3$ (Completion $y_3$)**: $\frac{0.50 - 0.40}{0.70} = \mathbf{+0.14}$ $\implies$ **Slightly Above Average!**
+- **$A_4$ (Completion $y_4$)**: $\frac{-0.30 - 0.40}{0.70} = \mathbf{-1.00}$ $\implies$ **Below Average! (Negative Suppression)**
+
+---
+
+### 3.5 Step 3: Token Credit Assignment & Probability Ratio Calculation ($r_{i,t}$)
+
+#### What is $y_{i,t}$?
+$y_{i,t}$ is **any token generated by the model** during rollout at position $t$ (reasoning text, numbers, symbols, XML tags).
+
+#### REINFORCE Credit Assignment:
+Since completion $y_1$ achieved $A_1 = +1.57$, **every single generated token $y_{1,t}$ in $y_1$** (including `<think>`, `120/1.5`, `80`, `22.22`, `<answer>`) inherits advantage $A_1 = +1.57$!
+
+During the weight update step, we pass prompt $x$ + completion $y_i$ into the active policy $\pi_\theta$ and measure how the token probability shifted relative to the sampling policy $\pi_{\theta_{\text{old}}}$:
+
+$$r_{i,t}(\theta) = \frac{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})}{\pi_{\theta_{\text{old}}}(y_{i,t} \mid x, y_{i,\lt t})}$$
+
+- **$r_{i,t} > 1.0$**: Current weights $\theta$ make token $y_{i,t}$ **more probable**.
+- **$r_{i,t} < 1.0$**: Current weights $\theta$ make token $y_{i,t}$ **less probable**.
+
+---
+
+### 3.6 Step 4: Bounded Updates via Asymmetric Ratio Clipping ($\epsilon_{\text{low}}, \epsilon_{\text{high}}$)
+To prevent single high-reward rollouts from causing gradient explosions, GRPO applies **pessimistic clipping**:
+
+$$\text{Clipped Objective}_{i,t} = \min \left( r_{i,t}(\theta) A_i, \; \text{clip}(r_{i,t}(\theta), 1 - \epsilon_{\text{low}}, 1 + \epsilon_{\text{high}}) A_i \right)$$
+
+- For positive advantage ($A_1 = +1.57$), ratio growth is capped at $1 + \epsilon_{\text{high}} = 1.28$. The policy cannot increase token probability by more than 28% in a single step.
+- For negative advantage ($A_4 = -1.00$), ratio drop is capped at $1 - \epsilon_{\text{low}} = 0.80$.
+
+---
+
+### 3.7 Step 5: Schulman Per-Token KL Penalty ($D_{\text{KL}}$) & Loss Minimization
+
+To ensure the policy $\pi_\theta$ does not drift into reward-hacking fluff, we subtract a per-token Kullback-Leibler (KL) divergence penalty relative to the frozen reference warmup model $\pi_{\text{ref}}$:
+
+$$D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_{i,t})}{\pi_\theta(y_{i,t})} - \log \frac{\pi_{\text{ref}}(y_{i,t})}{\pi_\theta(y_{i,t})} - 1$$
+
+#### Full Loss Objective Equation ($\mathcal{L}_{\text{GRPO}}$):
+
+$$\mathcal{L}_{\text{GRPO}}(\theta) = -\frac{1}{G} \sum_{i=1}^{G} \frac{1}{|y_i|} \sum_{t=1}^{|y_i|} \left[ \min \left( r_{i,t} A_i, \; \text{clip}(r_{i,t}, 1-\epsilon_{\text{low}}, 1+\epsilon_{\text{high}}) A_i \right) \right] + \beta D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$$
+
+#### How PyTorch Minimizes Loss ($\mathcal{L}_{\text{GRPO}}$):
+Notice the **minus sign** (`-`) in front of the advantage term:
+- **For Correct Completion $y_1$ ($A_1 = +1.57$)**: Loss contribution is $-1.57 \cdot r_{1,t}$. PyTorch minimizes loss by **increasing $r_{1,t}$** $\implies$ **Probabilities of correct tokens GO UP!**
+- **For Wrong Completion $y_4$ ($A_4 = -1.00$)**: Loss contribution is $+1.00 \cdot r_{4,t}$. PyTorch minimizes loss by **decreasing $r_{4,t}$** $\implies$ **Probabilities of wrong tokens GO DOWN!**
+
+During `loss.backward()`, PyTorch computes parameter gradients:
+$$\nabla_W \mathcal{L}(\theta) = \frac{\partial \mathcal{L}_{\text{GRPO}}(\theta)}{\partial W}$$
+
+and fused AdamW updates LoRA matrices $A$ and $B$:
+$$W \leftarrow W - \eta \cdot \text{AdamW}\left( \nabla_W \mathcal{L}(\theta) \right)$$
+
+---
+
+### 3.8 Reward Hacking: Mechanics, Vulnerabilities, and Production Mitigations in Our GRPO Pipeline
 
 #### 1. What is Reward Hacking in Our GRPO Setup?
 In our reinforcement learning pipeline (`04_modal_qwen_2_5_1_5b_grpo.ipynb`), **Reward Hacking** (specification gaming) occurs when Qwen2.5-1.5B discovers degenerate token generation patterns that maximize the scalar outputs of our 4 reward functions (`format_reward`, `correctness_reward`, `instruction_reward`, `length_reward`) without actually solving the underlying reasoning task.
