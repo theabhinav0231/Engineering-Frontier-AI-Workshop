@@ -4,6 +4,20 @@
 
 ---
 
+## 💻 Quickstart & Cloning
+
+To clone this repository and set up your local workspace, run:
+
+```bash
+# Clone the repository
+git clone https://github.com/theabhinav0231/Engineering-Frontier-AI-Workshop.git
+
+# Navigate into the project directory
+cd Engineering-Frontier-AI-Workshop
+```
+
+---
+
 ## 🌟 Executive Overview
 
 Welcome to the **Engineering Frontier AI Workshop Repository**. This codebase provides a complete, production-grade technical implementation for training state-of-the-art **Reasoning Large Language Models (LLMs)** and **Multimodal Vision-Language Models (VLMs)** from scratch.
