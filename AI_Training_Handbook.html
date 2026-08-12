@@ -170,7 +170,7 @@
 <hr />
 <h2 id="executive-summary-engineering-architecture">Executive Summary &amp; Engineering Architecture</h2>
 <p>This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 13 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.</p>
-<p><img alt="System Architecture and Data Flow" src="training_pipeline.png" /></p>
+<p><img alt="System Architecture and Data Flow" src="assets/training_pipeline.png" /></p>
 <hr />
 <h2 id="1-fine-tuning-foundations-peft-lora-technical-deep-dive">1. Fine-Tuning Foundations: PEFT &amp; LoRA Technical Deep-Dive</h2>
 <h3 id="11-mathematical-formulation-of-low-rank-adaptation-lora">1.1 Mathematical Formulation of Low-Rank Adaptation (LoRA)</h3>
@@ -190,7 +190,7 @@
 $$\Delta W = B \cdot A$$</p>
 <p>During forward propagation, the linear layer output $h$ for an input $x$ is computed as:
 $$h = W_0 x + \Delta W x = W_0 x + \frac{\alpha}{r} (B \cdot A x)$$</p>
-<p><img alt="Weight update in regular finetuning vs LoRA" src="lora_weight_update.png" /></p>
+<p><img alt="Weight update in regular finetuning vs LoRA" src="assets/lora_weight_update.png" /></p>
 <h3 id="12-qlora-normalfloat4-nf4-base-weight-quantization">1.2 QLoRA: NormalFloat4 (NF4) Base Weight Quantization</h3>
 <p>In QLoRA, the base model weights $W_0$ are quantized to 4-bit NormalFloat (NF4) precision, while the adapter matrices $A$ and $B$ remain in 16-bit precision (BF16 or FP16).
 NF4 is an information-theoretically optimal quantile quantization scheme for normally distributed weights:
@@ -395,7 +395,7 @@ model_m.push_to_hub_merged(HF_MERGED_REPO, tok_m, save_method=&quot;merged_16bit
 <h3 id="23-learning-rate-schedules-mathematical-formulation">2.3 Learning Rate Schedules &amp; Mathematical Formulation</h3>
 <p>We utilize Cosine Annealing with Warmup across all training runs.</p>
 <p>$$\eta_t = \begin{cases} \eta_{\max} \cdot \frac{t}{T_{\text{warmup}}}, & t \le T_{\text{warmup}} \\[8pt] \eta_{\min} + \frac{1}{2}(\eta_{\max} - \eta_{\min}) \left(1 + \cos\left(\frac{\pi (t - T_{\text{warmup}})}{T_{\text{total}} - T_{\text{warmup}}}\right)\right), & t > T_{\text{warmup}} \end{cases}$$</p>
-<p><img alt="Cosine Learning Rate Schedule with Warmup" src="cosine_lr_diagram.png" /></p>
+<p><img alt="Cosine Learning Rate Schedule with Warmup" src="assets/cosine_lr_diagram.png" /></p>
 <hr />
 <h2 id="3-reinforcement-learning-via-grpo-complete-step-by-step-intuition-mathematical-walkthrough">3. Reinforcement Learning via GRPO: Complete Step-by-Step Intuition &amp; Mathematical Walkthrough</h2>
 <h3 id="31-the-fundamental-goal-of-grpo">3.1 The Fundamental Goal of GRPO</h3>
@@ -533,7 +533,7 @@ $$W \leftarrow W - \eta \cdot \text{AdamW}\left( \nabla_W \mathcal{L}(\theta) \r
 <hr />
 <h2 id="4-technical-interpretation-of-all-grpo-training-metrics-plots">4. Technical Interpretation of ALL GRPO Training Metrics &amp; Plots</h2>
 <p>Monitoring Weights &amp; Biases (W&amp;B) diagnostic plots is crucial during GRPO reinforcement learning to verify training health and detect policy anomalies.</p>
-<p><img alt="GRPO RL Training Diagnostics" src="grpo_all_plots.png" /></p>
+<p><img alt="GRPO RL Training Diagnostics" src="assets/grpo_all_plots.png" /></p>
 <h3 id="41-detailed-breakdown-of-the-6-diagnostic-training-panels">4.1 Detailed Breakdown of the 6 Diagnostic Training Panels</h3>
 <h4 id="panel-1-dapo-policy-loss-optimization-stability">Panel 1: DAPO Policy Loss &amp; Optimization Stability</h4>
 <ul>

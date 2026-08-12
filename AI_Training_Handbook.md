@@ -6,7 +6,7 @@
 
 This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 13 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.
 
-![System Architecture and Data Flow](training_pipeline.png)
+![System Architecture and Data Flow](assets/training_pipeline.png)
 
 ---
 
@@ -31,7 +31,7 @@ $$\Delta W = B \cdot A$$
 During forward propagation, the linear layer output $h$ for an input $x$ is computed as:
 $$h = W_0 x + \Delta W x = W_0 x + \frac{\alpha}{r} (B \cdot A x)$$
 
-![Weight update in regular finetuning vs LoRA](lora_weight_update.png)
+![Weight update in regular finetuning vs LoRA](assets/lora_weight_update.png)
 
 ### 1.2 QLoRA: NormalFloat4 (NF4) Base Weight Quantization
 In QLoRA, the base model weights $W_0$ are quantized to 4-bit NormalFloat (NF4) precision, while the adapter matrices $A$ and $B$ remain in 16-bit precision (BF16 or FP16).
@@ -146,7 +146,7 @@ We utilize Cosine Annealing with Warmup across all training runs.
 
 $$\eta_t = \begin{cases} \eta_{\max} \cdot \frac{t}{T_{\text{warmup}}}, & t \le T_{\text{warmup}} \\[8pt] \eta_{\min} + \frac{1}{2}(\eta_{\max} - \eta_{\min}) \left(1 + \cos\left(\frac{\pi (t - T_{\text{warmup}})}{T_{\text{total}} - T_{\text{warmup}}}\right)\right), & t > T_{\text{warmup}} \end{cases}$$
 
-![Cosine Learning Rate Schedule with Warmup](cosine_lr_diagram.png)
+![Cosine Learning Rate Schedule with Warmup](assets/cosine_lr_diagram.png)
 
 ---
 
@@ -309,7 +309,7 @@ Because GRPO samples $G=8$ completion rollouts $\{y_1, y_2, \ldots, y_8\}$ per p
 
 Monitoring Weights & Biases (W&B) diagnostic plots is crucial during GRPO reinforcement learning to verify training health and detect policy anomalies.
 
-![GRPO RL Training Diagnostics](grpo_all_plots.png)
+![GRPO RL Training Diagnostics](assets/grpo_all_plots.png)
 
 ### 4.1 Detailed Breakdown of the 6 Diagnostic Training Panels
 
