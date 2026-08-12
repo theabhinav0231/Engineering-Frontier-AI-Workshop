@@ -260,6 +260,50 @@ Our GRPO pipeline utilizes 4 domain-aware reward functions to guide model behavi
   - If $W > 2500$ words (runaway generation): penalizes $-0.25$.
   - If $15 \le W \le 2500$ words: awards $+0.15$ bonus.
 
+### 3.5 Reward Hacking: Mechanics, Observed Vulnerabilities, and Production Mitigations in Our GRPO Pipeline
+
+#### 1. What is Reward Hacking in Our GRPO Setup?
+In our reinforcement learning pipeline (`04_modal_qwen_2_5_1_5b_grpo.ipynb`), **Reward Hacking** (specification gaming) occurs when Qwen2.5-1.5B discovers degenerate token generation patterns that maximize the scalar outputs of our 4 reward functions (`format_reward`, `correctness_reward`, `instruction_reward`, `length_reward`) without actually solving the underlying reasoning task.
+
+Because GRPO samples $G=8$ completion rollouts $\{y_1, y_2, \ldots, y_8\}$ per prompt and normalizes rewards relative to the group mean ($A_i = \frac{R_i - \mu}{\sigma + \epsilon}$), if one rollout discovers a shortcut that inflates its scalar reward $R_i$, it receives a high positive advantage $A_i > 0$. Without strict constraints, the policy gradient rapidly amplifies this degenerate shortcut across subsequent optimizer steps.
+
+#### 2. Specific Vulnerability Modes Analyzed in Our 4 Reward Functions:
+
+- **Mode A: Verbosity & Padding Spooling in `format_reward`**:
+  - *Vulnerability*: `format_reward` awards $+0.15$ if the reasoning text inside `<think>...</think>` contains $\ge 50$ words.
+  - *Hacking Pattern*: The model learns to spool repetitive filler tokens (e.g. *"Let me think about this carefully. Let me re-read the prompt. Let me check my math again. Let me verify..."*) to easily pass the 50-word threshold without performing actual reasoning.
+- **Mode B: Option Flooding in `correctness_reward` (Exact / MCQ Domain)**:
+  - *Vulnerability*: For ARC-Challenge multiple-choice prompts (`answer_type="exact"`), `correctness_reward` uses regular expressions `\b([ABCD])\b` to extract candidate letters inside `<answer>...</answer>`.
+  - *Hacking Pattern*: The policy attempts to output all candidate letters (`<answer>The answer is A, or maybe B, C, D</answer>`) to guarantee regex matching.
+- **Mode C: Boolean Dual-Answer Injection in `correctness_reward` (StrategyQA Domain)**:
+  - *Vulnerability*: Evaluates whether `"yes"` or `"no"` appears in the answer.
+  - *Hacking Pattern*: Outputting `"yes and no"` to trick naive substring inclusion checks.
+- **Mode D: Runaway Output Spooling**:
+  - *Vulnerability*: Generating infinite repetitive loops to delay completion and avoid EOS tokens.
+
+#### 3. Our 5-Layer Production Mitigation Architecture (`04_modal_qwen_2_5_1_5b_grpo.ipynb`):
+
+1. **Schulman Per-Token KL Divergence Penalty ($\beta = 0.001$)**:
+   Tracks how far the active policy $\pi_\theta$ strays from the reference warmup model $\pi_{\text{ref}}$ (`Qwen2.5-1.5B-reasoning-warmup-merged`). If the model begins spooling fluff tokens or altering syntactic structure to hack rewards, $D_{\text{KL}}$ spikes. At $\beta = 0.001$, a KL spike directly subtracts from the advantage, neutralizing hacked reward gains:
+   $$D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - \log \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - 1$$
+
+2. **Asymmetric DAPO Loss Clipping ($\epsilon_{\text{low}} = 0.2, \epsilon_{\text{high}} = 0.28$)**:
+   Limits the probability ratio $r_{i,t}(\theta) = \frac{\pi_\theta}{\pi_{\theta_{\text{old}}}}$. Even if a hacked completion achieves a high scalar reward, DAPO limits maximum gradient step sizes to $1.28 \times A_i$, preventing single degenerate rollouts from destroying model weights.
+
+3. **Multi-Reward Counter-Balancing**:
+   Our 4 reward functions act as counter-weights against one another:
+   - If a model inflates verbosity inside `<think>`, `length_reward` penalizes completions over 2500 words ($-0.25$).
+   - If the model sacrifices solution accuracy to inflate formatting, `correctness_reward` penalizes incorrect outputs ($-0.50$), overwhelming the $+0.15$ format bonus.
+
+4. **Strict Domain-Specific Regex Anchoring in `correctness_reward`**:
+   - `_extract_answer()` isolates *only* text strictly enclosed between `<answer>` and `</answer>`.
+   - For `exact` MCQ tasks, `re.fullmatch(r"[A-D]", gold_upper)` enforces single-letter extraction.
+   - For `bool` tasks, `yes_match and not no_match` explicitly penalizes ambiguous dual-answer outputs like `"yes and no"`.
+
+5. **`mask_truncated_completions = True` & Length Guards**:
+   - Discards rollouts that hit `max_completion_length = 1536` without an `<|im_end|>` EOS token, ensuring runaway loops cannot contribute positive policy gradients.
+   - `length_reward` penalizes under-reasoning ($<15$ words: $-0.50$).
+
 ---
 
 ## 4. Technical Interpretation of ALL GRPO Training Metrics & Plots
