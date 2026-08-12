@@ -354,22 +354,22 @@ Unlike online distillation (which requires loading teacher and student models si
 
 ### 5.2 Token-Level Cross-Entropy Loss Formulation: Comprehensive Theory & Mechanics
 
-#### 1. What Does Cross-Entropy Loss Measure?
-Cross-Entropy (CE) Loss measures the **information-theoretic discrepancy** (or negative log-likelihood) between the true target token distribution $P_{\text{target}}(y_t)$ (the teacher model's completion, represented as a 1-hot target vector over the vocabulary $V$) and the student model's predicted probability distribution $P_\theta(y_t \mid y_{\lt t}, x)$.
+#### Executive Summary & Key Principles
+1. **What Cross-Entropy Loss Measures**: Cross-Entropy Loss evaluates the information-theoretic gap between the model's predicted probability distribution $Q$ and the ground-truth target distribution $P$ (represented as a 1-hot vector over the vocabulary $|V|$).
+2. **Core Loss Equation**:
+   $$\text{Loss}_t = -\log P_\theta(y_{\text{target}} \mid x, y_{\lt t})$$
+   - **High Confidence ($P \to 1.0$)**: Loss $= -\log(1.0) = \mathbf{0.0}$ (Zero gradient, no weight change).
+   - **Low Confidence ($P \to 0.01$)**: Loss $= -\log(0.01) = \mathbf{4.6}$ (High loss, triggers large gradient step).
+3. **Prompt Masking (`labels = -100`)**: In PyTorch, prompt tokens are assigned `labels = -100` ($m_t = 0$), ensuring loss is calculated **strictly on assistant completion tokens**, ignoring user prompt tokens.
+4. **PyTorch Optimization Action**: Minimizing Cross-Entropy Loss forces PyTorch gradient descent to **push up the predicted probability of target tokens** toward 1.0.
 
-Mathematically, Cross-Entropy between true distribution $P$ and predicted distribution $Q$ is:
+![Cross-Entropy Loss: True vs Predicted Token Distributions](assets/cross_entropy_diagram.png)
+
+#### Mathematical Formulation & Derivation
+Cross-Entropy $H(P, Q)$ between target $P$ and predicted $Q$ is defined as:
 $$H(P, Q) = -\sum_{v \in V} P(v) \log Q(v) = H(P) + D_{\text{KL}}(P \| Q)$$
 
-Since the ground-truth target is a deterministic one-hot vector ($H(P) = 0$), minimizing Cross-Entropy Loss is **mathematically identical to minimizing the KL divergence** $D_{\text{KL}}(P_{\text{teacher}} \| P_{\text{student}})$ between the teacher's distribution and the student's predictions!
-
-#### 2. How is Token-Level Cross-Entropy Loss Calculated Step-by-Step?
-1. **Logit Computation**: The student model passes input context $x$ and preceding tokens $y_{\lt t}$ through its Transformer layers to produce unnormalized logit vectors $z_t \in \mathbb{R}^{|V|}$ (where vocabulary size $|V| = 151,936$).
-2. **Softmax Normalization**: Logits are converted into a probability distribution via Softmax:
-   $$P_\theta(y_t = k \mid y_{\lt t}, x) = \frac{\exp(z_{t,k})}{\sum_{j=1}^{|V|} \exp(z_{t,j})}$$
-3. **Target Surprisal Calculation**: The loss for target token $y_t$ is its negative log probability: $-\log P_\theta(y_t \mid y_{\lt t}, x)$.
-4. **Label Masking ($m_t$)**: Prompt tokens are assigned `labels = -100` ($m_t = 0$), ensuring zero gradient computation over prompt tokens. Assistant completion tokens are assigned target token IDs ($m_t = 1$).
-5. **Masked Sequence Loss Formulation**:
-   $$\mathcal{L}_{\text{CE}}(\theta) = -\frac{1}{\sum_{t=1}^T m_t} \sum_{t=1}^{T} m_t \cdot \log P_\theta(y_t \mid y_{\lt t}, x)$$
+Since the ground-truth target is a deterministic one-hot vector ($H(P) = 0$), minimizing Cross-Entropy Loss is **mathematically identical to minimizing the KL divergence** $D_{\text{KL}}(P_{\text{true}} \| P_{\text{model}})$ between the target token distribution and the student model's predicted probability distribution.
 
 ---
 
