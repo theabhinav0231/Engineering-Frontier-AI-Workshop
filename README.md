@@ -1,4 +1,4 @@
-# 🚀 Engineering Frontier AI (2026): From Foundation Models to Multimodal AI
+# Engineering Frontier AI (2026): From Foundation Models to Multimodal AI
 
 > **A Comprehensive Hands-On Framework for Building, Distilling, Training, and Quantizing Reasoning LLMs and Multimodal Vision-Language Models (VLMs)**
 
