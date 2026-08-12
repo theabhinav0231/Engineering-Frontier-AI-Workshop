@@ -169,7 +169,7 @@
 <h1 id="ai-training-handbook">AI Training Handbook</h1>
 <hr />
 <h2 id="executive-summary-engineering-architecture">Executive Summary &amp; Engineering Architecture</h2>
-<p>This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 13 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.</p>
+<p>This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 15 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.</p>
 <p><img alt="System Architecture and Data Flow" src="assets/training_pipeline.png" /></p>
 <hr />
 <h2 id="1-fine-tuning-foundations-peft-lora-technical-deep-dive">1. Fine-Tuning Foundations: PEFT &amp; LoRA Technical Deep-Dive</h2>
@@ -658,6 +658,30 @@ def classify_case(raw_stats):
     else:
         return &quot;FAIL_no_schema&quot;
 </code></pre>
+<h3 id="63-fast-inference-acceleration-dual-channel-response-parsing">6.3 Fast Inference Acceleration &amp; Dual-Channel Response Parsing</h3>
+<p>In <code>06_colab_lily_1_5b_inference.ipynb</code> and <code>09_colab_lily_1_5b_v03_inference.ipynb</code>, production inference uses Unsloth's optimized generation kernels:</p>
+<pre><code class="language-python">from unsloth import FastLanguageModel
+
+# Enable Unsloth vLLM-style fast generation kernels (2x faster, 60% less VRAM)
+FastLanguageModel.for_inference(model)
+
+# Execute ChatML prompt formatting
+inputs = tokenizer.apply_chat_template(
+    messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors=&quot;pt&quot;
+).to(&quot;cuda&quot;)
+
+# Dual-Channel Response Extractor via Regex
+def parse_cot_response(raw_output):
+    cot_match = re.search(r&quot;\lt think&gt;(.*?)\lt /think&gt;\s*\lt answer&gt;(.*?)\lt /answer&gt;&quot;, raw_output, re.DOTALL)
+    if cot_match:
+        reasoning_trace = cot_match.group(1).strip()
+        final_answer    = cot_match.group(2).strip()
+        return reasoning_trace, final_answer
+    return None, raw_output.strip()
+</code></pre>
 <hr />
 <h2 id="7-model-export-quantization-gguf-conversion">7. Model Export, Quantization &amp; GGUF Conversion</h2>
 <h3 id="71-gguf-container-format-quantization-theory">7.1 GGUF Container Format &amp; Quantization Theory</h3>
@@ -727,6 +751,27 @@ model_m.save_pretrained_gguf(&quot;gguf_model&quot;, tok_m, quantization_method=
 </tr>
 </tbody>
 </table>
+<h3 id="73-multimodal-gguf-export-dual-binary-architecture-15_colab_lily_vlm_ggufipynb">7.3 Multimodal GGUF Export &amp; Dual-Binary Architecture (<code>15_colab_lily_vlm_gguf.ipynb</code>)</h3>
+<p>Unlike text-only LLMs that compile into a single <code>.gguf</code> file, Vision-Language Models (VLMs) on edge devices require <strong>two separate binary artifacts</strong>:</p>
+<ol>
+<li><strong>Multimodal Projector Binary (<code>mmproj-model-f16.gguf</code>)</strong>: Contains the SigLIP-2 vision encoder weights and the 2-layer MLP projector matrix converted to GGML binary format.</li>
+<li><strong>Text Backbone Binary (<code>Lily-Vision-Q4_K_M.gguf</code>)</strong>: Contains the 4-bit quantized base LLM weights.</li>
+</ol>
+<pre><code>[ Input Image ] ----&gt; mmproj-model-f16.gguf (SigLIP-2 + MLP) ----&gt; 324 Vision Tokens
+                                                                          |
+[ Input Prompt ] ---&gt; Lily-Vision-Q4_K_M.gguf (Text Backbone) \lt ----------+
+                                                                          |
+                                                                  [ Generated Answer ]
+</code></pre>
+<h4 id="edge-execution-command-line-llamacpp">Edge Execution Command Line (<code>llama.cpp</code>)</h4>
+<pre><code class="language-bash"># Execute Multimodal VLM Inference on Edge CPU/GPU
+./llama-cli \
+  -m /content/Lily-Vision-Q4_K_M.gguf \
+  --mmproj /content/mmproj-model-f16.gguf \
+  --image /content/test_image.jpg \
+  -p &quot;Describe the mathematical steps shown in this image.&quot; \
+  -n 512
+</code></pre>
 <hr />
 <h2 id="8-multimodal-vision-extension-lily-vision">8. Multimodal Vision Extension (Lily Vision)</h2>
 <h3 id="81-vlm-architecture-dimensionality-pipeline">8.1 VLM Architecture &amp; Dimensionality Pipeline</h3>

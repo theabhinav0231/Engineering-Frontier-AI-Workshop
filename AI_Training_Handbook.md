@@ -4,7 +4,7 @@
 
 ## Executive Summary & Engineering Architecture
 
-This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 13 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.
+This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 15 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.
 
 ![System Architecture and Data Flow](assets/training_pipeline.png)
 
@@ -454,6 +454,33 @@ def classify_case(raw_stats):
         return "FAIL_no_schema"
 ```
 
+### 6.3 Fast Inference Acceleration & Dual-Channel Response Parsing
+In `06_colab_lily_1_5b_inference.ipynb` and `09_colab_lily_1_5b_v03_inference.ipynb`, production inference uses Unsloth's optimized generation kernels:
+
+```python
+from unsloth import FastLanguageModel
+
+# Enable Unsloth vLLM-style fast generation kernels (2x faster, 60% less VRAM)
+FastLanguageModel.for_inference(model)
+
+# Execute ChatML prompt formatting
+inputs = tokenizer.apply_chat_template(
+    messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt"
+).to("cuda")
+
+# Dual-Channel Response Extractor via Regex
+def parse_cot_response(raw_output):
+    cot_match = re.search(r"<think>(.*?)</think>\s*<answer>(.*?)</answer>", raw_output, re.DOTALL)
+    if cot_match:
+        reasoning_trace = cot_match.group(1).strip()
+        final_answer    = cot_match.group(2).strip()
+        return reasoning_trace, final_answer
+    return None, raw_output.strip()
+```
+
 ---
 
 ## 7. Model Export, Quantization & GGUF Conversion
@@ -498,6 +525,32 @@ model_m.save_pretrained_gguf("gguf_model", tok_m, quantization_method="q4_k_m")
 | **`Q8_0`** | 8-bit Standard Quant | 1.62 GB | ~2.5 GB | Server-side high-precision inference |
 | **`Q5_K_M`** | 5-bit K-Quant (Medium) | 1.12 GB | ~1.8 GB | Optimal quality/memory balance |
 | **`Q4_K_M`** | 4-bit K-Quant (Medium) | 0.98 GB | ~1.5 GB | Mobile / Edge CPU deployment |
+
+### 7.3 Multimodal GGUF Export & Dual-Binary Architecture (`15_colab_lily_vlm_gguf.ipynb`)
+
+Unlike text-only LLMs that compile into a single `.gguf` file, Vision-Language Models (VLMs) on edge devices require **two separate binary artifacts**:
+
+1. **Multimodal Projector Binary (`mmproj-model-f16.gguf`)**: Contains the SigLIP-2 vision encoder weights and the 2-layer MLP projector matrix converted to GGML binary format.
+2. **Text Backbone Binary (`Lily-Vision-Q4_K_M.gguf`)**: Contains the 4-bit quantized base LLM weights.
+
+```
+[ Input Image ] ----> mmproj-model-f16.gguf (SigLIP-2 + MLP) ----> 324 Vision Tokens
+                                                                          |
+[ Input Prompt ] ---> Lily-Vision-Q4_K_M.gguf (Text Backbone) <----------+
+                                                                          |
+                                                                  [ Generated Answer ]
+```
+
+#### Edge Execution Command Line (`llama.cpp`)
+```bash
+# Execute Multimodal VLM Inference on Edge CPU/GPU
+./llama-cli \
+  -m /content/Lily-Vision-Q4_K_M.gguf \
+  --mmproj /content/mmproj-model-f16.gguf \
+  --image /content/test_image.jpg \
+  -p "Describe the mathematical steps shown in this image." \
+  -n 512
+```
 
 ---
 
