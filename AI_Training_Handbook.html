@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Training Handbook</title>
+    <!-- KaTeX CSS & JS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        @page {
+            size: A4;
+            margin: 16mm 14mm 16mm 14mm;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            line-height: 1.5;
+            font-size: 9.8pt;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 0;
+        }
+
+        h1 {
+            font-size: 20pt;
+            font-weight: 700;
+            color: #0f172a;
+            border-bottom: 2.5px solid #2563eb;
+            padding-bottom: 6px;
+            margin-top: 22px;
+            margin-bottom: 14px;
+            page-break-after: avoid;
+        }
+
+        h2 {
+            font-size: 14pt;
+            font-weight: 600;
+            color: #1e3a8a;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 4px;
+            margin-top: 18px;
+            margin-bottom: 10px;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            font-size: 11.5pt;
+            font-weight: 600;
+            color: #2563eb;
+            margin-top: 14px;
+            margin-bottom: 6px;
+            page-break-after: avoid;
+        }
+
+        h4 {
+            font-size: 10.5pt;
+            font-weight: 600;
+            color: #334155;
+            margin-top: 12px;
+            margin-bottom: 4px;
+            page-break-after: avoid;
+        }
+
+        p {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+
+        code {
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 8.5pt;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 2px 4px;
+            border-radius: 3px;
+            border: 1px solid #e2e8f0;
+        }
+
+        pre {
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 10px 14px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 8pt;
+            line-height: 1.4;
+            margin-top: 6px;
+            margin-bottom: 12px;
+            page-break-inside: avoid;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+            border: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            margin-bottom: 14px;
+            font-size: 8.5pt;
+            page-break-inside: avoid;
+        }
+
+        th {
+            background-color: #1e293b;
+            color: #ffffff;
+            font-weight: 600;
+            text-align: left;
+            padding: 6px 8px;
+            border: 1px solid #334155;
+        }
+
+        td {
+            padding: 5px 8px;
+            border: 1px solid #cbd5e1;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        blockquote {
+            border-left: 4px solid #2563eb;
+            background-color: #eff6ff;
+            margin: 10px 0;
+            padding: 8px 14px;
+            border-radius: 0 4px 4px 0;
+            color: #1e40af;
+        }
+
+        ul, ol {
+            margin-top: 0;
+            margin-bottom: 8px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 3px;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 14px auto;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            page-break-inside: avoid;
+        }
+
+        .katex-display {
+            margin: 10px 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+    </style>
+</head>
+<body>
+<h1 id="ai-training-handbook">AI Training Handbook</h1>
+<hr />
+<h2 id="executive-summary-engineering-architecture">Executive Summary &amp; Engineering Architecture</h2>
+<p>This handbook serves as the definitive technical reference manual for our LLM and Vision-Language Model (VLM) training ecosystem. Synthesized directly from the production code across all 13 notebooks in our codebase, it bridges theoretical deep-learning concepts with real-world implementation technicalities.</p>
+<p><img alt="System Architecture and Data Flow" src="training_pipeline.png" /></p>
+<hr />
+<h2 id="1-fine-tuning-foundations-peft-lora-technical-deep-dive">1. Fine-Tuning Foundations: PEFT &amp; LoRA Technical Deep-Dive</h2>
+<h3 id="11-mathematical-formulation-of-low-rank-adaptation-lora">1.1 Mathematical Formulation of Low-Rank Adaptation (LoRA)</h3>
+<p>In standard full fine-tuning, an LLM parameter matrix $W_0 \in \mathbb{R}^{d \times k}$ is updated directly via gradient descent ($W = W_0 + \Delta W$). When $d$ and $k$ are large (e.g., hidden dimension $d=1536$ and intermediate MLP dimension $k=8960$ in Qwen2.5-1.5B), updating $\Delta W$ directly requires massive VRAM for storing optimizer states (AdamW requires 8 bytes per parameter for first and second moments).</p>
+<h4 id="explicit-variable-definitions">Explicit Variable Definitions:</h4>
+<ul>
+<li><strong>$W_0 \in \mathbb{R}^{d \times k}$</strong>: Pre-trained frozen base weight matrix of the target linear layer.</li>
+<li><strong>$d$</strong>: Input feature dimension (in-features / hidden size, e.g., $d=1536$ in Qwen2.5-1.5B).</li>
+<li><strong>$k$</strong>: Output feature dimension (out-features / projection size, e.g., $k=8960$ in SwiGLU MLP layers).</li>
+<li><strong>$\Delta W \in \mathbb{R}^{d \times k}$</strong>: High-dimensional weight update matrix resulting from fine-tuning gradients ($W = W_0 + \Delta W$).</li>
+<li><strong>$r$</strong>: Inner low-rank hyperparameter ($r \ll \min(d, k)$).</li>
+<li><strong>$A \in \mathbb{R}^{r \times k}$</strong>: Down-projection adapter matrix, initialized with Gaussian distribution $\mathcal{N}(0, \frac{1}{r})$.</li>
+<li><strong>$B \in \mathbb{R}^{d \times r}$</strong>: Up-projection adapter matrix, initialized to zero ($B=0$) ensuring $\Delta W = 0$ at step 0.</li>
+<li><strong>$\alpha$</strong>: Constant LoRA scaling hyperparameter. The ratio $\frac{\alpha}{r}$ scales the adapter's contribution relative to the base model.</li>
+</ul>
+<p>LoRA parametrizes the weight update matrix $\Delta W$ by decomposing it into two low-rank matrices:
+$$\Delta W = B \cdot A$$</p>
+<p>During forward propagation, the linear layer output $h$ for an input $x$ is computed as:
+$$h = W_0 x + \Delta W x = W_0 x + \frac{\alpha}{r} (B \cdot A x)$$</p>
+<p><img alt="Weight update in regular finetuning vs LoRA" src="lora_weight_update.png" /></p>
+<h3 id="12-qlora-normalfloat4-nf4-base-weight-quantization">1.2 QLoRA: NormalFloat4 (NF4) Base Weight Quantization</h3>
+<p>In QLoRA, the base model weights $W_0$ are quantized to 4-bit NormalFloat (NF4) precision, while the adapter matrices $A$ and $B$ remain in 16-bit precision (BF16 or FP16).
+NF4 is an information-theoretically optimal quantile quantization scheme for normally distributed weights:
+$$q_i = \frac{1}{2} \left( Q_X\left(\frac{i}{2^k}\right) + Q_X\left(\frac{i+1}{2^k}\right) \right)$$
+where $Q_X(\cdot)$ is the quantile function of the standard normal distribution $\mathcal{N}(0, 1)$.</p>
+<h3 id="13-target-module-definitions-code-implementation">1.3 Target Module Definitions &amp; Code Implementation</h3>
+<p>Across our codebase (<code>02_modal_qwen_2_5_1_5b_sft.ipynb</code>, <code>04_modal_qwen_2_5_1_5b_grpo.ipynb</code>, <code>07_modal_lily_1_5b_distill.ipynb</code>, <code>13_lily-vision-phase2-sft.ipynb</code>), we apply LoRA across all 7 linear projection layers of the Transformer architecture:</p>
+<pre><code class="language-python">from unsloth import FastLanguageModel
+
+model = FastLanguageModel.get_peft_model(
+    model,
+    r = 32,                 # Rank: 32 (SFT/Distill/Vision), 64 (GRPO RL)
+    lora_alpha = 64,         # Alpha: 32 (SFT), 64 (GRPO/Distill/Vision)
+    target_modules = [
+        &quot;q_proj&quot;, &quot;k_proj&quot;, &quot;v_proj&quot;, &quot;o_proj&quot;,    # Self-Attention Projections
+        &quot;gate_proj&quot;, &quot;up_proj&quot;, &quot;down_proj&quot;         # SwiGLU MLP Projections
+    ],
+    lora_dropout = 0,        # 0 is optimized for Unsloth kernel fusion
+    bias = &quot;none&quot;,
+    use_gradient_checkpointing = &quot;unsloth&quot;,
+    random_state = 42,
+)
+</code></pre>
+<h4 id="detailed-technical-explanation-of-target-modules">Detailed Technical Explanation of Target Modules:</h4>
+<ul>
+<li><strong><code>q_proj</code> (Query Projection)</strong>: Transforms input hidden states into Query matrices ($Q$) for multi-head self-attention.</li>
+<li><strong><code>k_proj</code> (Key Projection)</strong>: Transforms input hidden states into Key matrices ($K$) for computing attention dot-product scores ($Q K^T$).</li>
+<li><strong><code>v_proj</code> (Value Projection)</strong>: Transforms input hidden states into Value matrices ($V$) carrying contextual token information.</li>
+<li><strong><code>o_proj</code> (Output Projection)</strong>: Projects concatenated multi-head attention outputs back to the model hidden dimension ($d=1536$).</li>
+<li><strong><code>gate_proj</code> (Gate Projection in SwiGLU)</strong>: Computes the element-wise gating signal in SwiGLU feed-forward networks ($\text{Swish}(x W_{\text{gate}}) \otimes x W_{\text{up}}$).</li>
+<li><strong><code>up_proj</code> (Up Projection in SwiGLU)</strong>: Expands input hidden dimension to high-dimensional intermediate space ($1536 \rightarrow 8960$).</li>
+<li><strong><code>down_proj</code> (Down Projection in SwiGLU)</strong>: Contracts intermediate dimension back to model hidden dimension ($8960 \rightarrow 1536$).</li>
+</ul>
+<h4 id="trainable-parameter-efficiency-calculation">Trainable Parameter Efficiency Calculation</h4>
+<p>For Qwen2.5-1.5B ($d_{\text{model}} = 1536, N_{\text{layers}} = 28$):
+- Total Base Parameters: $1,580,643,840$ (~1.58B)
+- Trainable Adapter Parameters ($r=32$): $36,929,536$ (~36.9M)
+- <strong>Trainable Ratio</strong>: $\frac{36.9\text{M}}{1580.6\text{M}} \approx 2.34\% \text{ to } 4.0\%$</p>
+<h3 id="14-lossless-16-bit-adapter-merging">1.4 Lossless 16-Bit Adapter Merging</h3>
+<p>Before running RL (GRPO) or exporting to GGUF, adapter weights must be mathematically merged into the base model to eliminate dual-path inference overhead:
+$$W_{\text{merged}} = W_0 + \frac{\alpha}{r} (B \cdot A)$$</p>
+<p>In code (<code>02</code>, <code>04</code>, <code>07</code>, <code>13</code>):</p>
+<pre><code class="language-python">model_m, tok_m = FastLanguageModel.from_pretrained(
+    model_name     = OUTPUT_DIR,
+    max_seq_length = MAX_SEQ_LENGTH,
+    dtype          = torch.bfloat16,  # Full precision BF16 merge
+    load_in_4bit   = False,           # Prevents quantization artifacts during merge
+)
+
+model_m.save_pretrained_merged(MERGED_DIR, tok_m, save_method=&quot;merged_16bit&quot;)
+model_m.push_to_hub_merged(HF_MERGED_REPO, tok_m, save_method=&quot;merged_16bit&quot;, token=HF_TOKEN)
+</code></pre>
+<hr />
+<h2 id="2-hyperparameter-engineering-optimization-strategy">2. Hyperparameter Engineering &amp; Optimization Strategy</h2>
+<h3 id="21-the-global-effective-batch-size-step-calculation">2.1 The Global Effective Batch Size &amp; Step Calculation</h3>
+<h4 id="1-what-is-a-training-step">1. What is a Training Step?</h4>
+<p>A <strong>single optimizer step</strong> corresponds to one iteration where model weights are updated by the optimizer using calculated gradients.</p>
+<h4 id="2-micro-batches-vs-gradient-accumulation">2. Micro-Batches vs. Gradient Accumulation</h4>
+<p>To fit large models into GPU memory, training datasets are split into smaller <strong>micro-batches</strong> ($B_{\text{device}}$). When gradient accumulation is enabled ($N_{\text{accum}}$), the engine performs $N_{\text{accum}}$ forward and backward passes, accumulating gradients in VRAM, before executing a single <code>optimizer.step()</code> update.</p>
+<h4 id="3-mathematical-formula-for-effective-batch-size">3. Mathematical Formula for Effective Batch Size:</h4>
+<p>$$B_{\text{eff}} = B_{\text{device}} \times N_{\text{accum}} \times N_{\text{GPU}}$$</p>
+<p>where:
+- <strong>$B_{\text{device}}$</strong>: Per-device micro-batch size processed in a single forward pass per GPU.
+- <strong>$N_{\text{accum}}$</strong>: Number of micro-batches accumulated before updating model weights.
+- <strong>$N_{\text{GPU}}$</strong>: Number of parallel GPUs participating in training.</p>
+<h4 id="4-mathematical-formula-for-total-optimizer-steps">4. Mathematical Formula for Total Optimizer Steps:</h4>
+<p>$$\text{Total Optimizer Steps} = \frac{|\mathcal{D}| \times N_{\text{epochs}}}{B_{\text{eff}}}$$</p>
+<p>where $|\mathcal{D}|$ is the number of samples in the dataset and $N_{\text{epochs}}$ is the total number of training passes over the dataset.</p>
+<h4 id="concrete-worked-step-calculation-examples-from-codebase">Concrete Worked Step Calculation Examples from Codebase:</h4>
+<ul>
+<li><strong>SFT Warmup (Notebook 02)</strong>: 4,000 samples $\times$ 2 Epochs = 8,000 total samples. $B_{\text{eff}} = 8 \times 2 \times 1 = 16$. $\text{Total Steps} = \frac{8000}{16} = 500$ steps.</li>
+<li><strong>Distillation (Notebook 07)</strong>: 91,457 raw samples packed into 33,297 contiguous sequences $\times$ 2 Epochs = 66,594 sequence passes. $B_{\text{eff}} = 24 \times 1 \times 1 = 24$. $\text{Total Steps} = \frac{66594}{24} = 2,776$ steps.</li>
+<li><strong>Vision Phase 2 SFT (Notebook 13)</strong>: 64,000 samples $\times$ 1 Epoch. $B_{\text{eff}} = 24 \times 2 \times 1 = 48$. $\text{Total Steps} = \frac{64000}{48} = 1,333$ steps.</li>
+</ul>
+<h3 id="22-verified-production-hyperparameter-comparison-matrix">2.2 Verified Production Hyperparameter Comparison Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Hyperparameter</th>
+<th>SFT Warmup (02)</th>
+<th>GRPO RL (04)</th>
+<th>Distillation (07)</th>
+<th>Vision Phase 1 (12)</th>
+<th>Vision Phase 2 (13)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Base Model</strong></td>
+<td>Qwen2.5-1.5B-Instruct</td>
+<td>Qwen2.5-Warmup-Merged</td>
+<td>Lily-1.5b-v0.1</td>
+<td>Lily-1.5b-v0.3</td>
+<td>Lily-1.5b-v0.3</td>
+</tr>
+<tr>
+<td><strong>Dataset Size ($\mathcal{D}$)</strong></td>
+<td>4,000 samples</td>
+<td>3,600 prompts</td>
+<td>91,457 (train)</td>
+<td>121,237 samples</td>
+<td>64,000 samples</td>
+</tr>
+<tr>
+<td><strong>Epochs / Steps</strong></td>
+<td>2 Epochs</td>
+<td>600 Max Steps</td>
+<td>2 Epochs (2,776 steps)</td>
+<td>1 Epoch</td>
+<td>1 Epoch</td>
+</tr>
+<tr>
+<td><strong>Per-Device Batch ($B_{\text{device}}$)</strong></td>
+<td>8</td>
+<td>4</td>
+<td>24</td>
+<td>16</td>
+<td>24</td>
+</tr>
+<tr>
+<td><strong>Grad Accum ($N_{\text{accum}}$)</strong></td>
+<td>2</td>
+<td>4</td>
+<td>1</td>
+<td>3</td>
+<td>2</td>
+</tr>
+<tr>
+<td><strong>Effective Batch ($B_{\text{eff}}$)</strong></td>
+<td><strong>16</strong></td>
+<td><strong>16</strong></td>
+<td><strong>24</strong></td>
+<td><strong>48</strong></td>
+<td><strong>48</strong></td>
+</tr>
+<tr>
+<td><strong>Peak Learning Rate ($\eta_{\max}$)</strong></td>
+<td>$1 \times 10^{-5}$</td>
+<td>$5 \times 10^{-6}$</td>
+<td>$2 \times 10^{-5}$</td>
+<td>$2 \times 10^{-4}$</td>
+<td>$2 \times 10^{-5}$</td>
+</tr>
+<tr>
+<td><strong>LR Scheduler</strong></td>
+<td>Cosine</td>
+<td>Cosine</td>
+<td>Cosine</td>
+<td>Cosine w/ warmup</td>
+<td>Cosine w/ warmup</td>
+</tr>
+<tr>
+<td><strong>Warmup Ratio</strong></td>
+<td>0.05</td>
+<td>0.05</td>
+<td>0.03</td>
+<td>0.05</td>
+<td>0.03</td>
+</tr>
+<tr>
+<td><strong>Optimizer</strong></td>
+<td><code>adamw_torch_fused</code></td>
+<td><code>adamw_torch_fused</code></td>
+<td><code>adamw_torch_fused</code></td>
+<td><code>AdamW</code> ($\beta_1=.9, \beta_2=.95$)</td>
+<td><code>AdamW</code></td>
+</tr>
+<tr>
+<td><strong>Weight Decay</strong></td>
+<td>0.01</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.05</td>
+<td>0.01</td>
+</tr>
+<tr>
+<td><strong>Max Sequence Length</strong></td>
+<td>3,072</td>
+<td>3,072</td>
+<td>4,096</td>
+<td>256</td>
+<td>3,072</td>
+</tr>
+<tr>
+<td><strong>Sequence Packing</strong></td>
+<td>False</td>
+<td>False</td>
+<td><strong>True</strong></td>
+<td>False</td>
+<td>False</td>
+</tr>
+<tr>
+<td><strong>Hardware</strong></td>
+<td>Modal A100 40GB</td>
+<td>Modal A100 40GB</td>
+<td>Modal A100 40GB</td>
+<td>Modal A100 40GB</td>
+<td>Modal A100 40GB</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-learning-rate-schedules-mathematical-formulation">2.3 Learning Rate Schedules &amp; Mathematical Formulation</h3>
+<p>We utilize Cosine Annealing with Warmup across all training runs.</p>
+<p>$$\eta_t = \begin{cases} \eta_{\max} \cdot \frac{t}{T_{\text{warmup}}}, & t \le T_{\text{warmup}} \\[8pt] \eta_{\min} + \frac{1}{2}(\eta_{\max} - \eta_{\min}) \left(1 + \cos\left(\frac{\pi (t - T_{\text{warmup}})}{T_{\text{total}} - T_{\text{warmup}}}\right)\right), & t > T_{\text{warmup}} \end{cases}$$</p>
+<p><img alt="Cosine Learning Rate Schedule with Warmup" src="cosine_lr_diagram.png" /></p>
+<hr />
+<h2 id="3-reinforcement-learning-via-grpo-complete-step-by-step-intuition-mathematical-walkthrough">3. Reinforcement Learning via GRPO: Complete Step-by-Step Intuition &amp; Mathematical Walkthrough</h2>
+<h3 id="31-the-fundamental-goal-of-grpo">3.1 The Fundamental Goal of GRPO</h3>
+<p>In Supervised Fine-Tuning (SFT), a human provides exact target text for the model to copy. In Reinforcement Learning (RL), the model must <strong>explore and discover reasoning trajectories on its own</strong>.</p>
+<p><strong>The Job of GRPO</strong>: Train the model to maximize verified reward (correct logic, strict formatting, correct answers) <strong>while constraining weight updates to be as conservative as possible</strong> to prevent policy collapse and reward hacking.</p>
+<p>To build complete mathematical and mechanical intuition, we carry <strong>one concrete running example</strong> through every step of the GRPO algorithm below.</p>
+<hr />
+<h3 id="32-running-example-setup">3.2 Running Example Setup</h3>
+<ul>
+<li><strong>Input Prompt ($x$)</strong>: <code>"If a train travels 120 km in 1.5 hours, what is its speed in m/s?"</code></li>
+<li><strong>Ground Truth Target</strong>: Speed in km/h = $\frac{120}{1.5} = 80 \text{ km/h}$. Converted to m/s: $80 \times \frac{1000}{3600} = 22.22 \text{ m/s}$.</li>
+<li><strong>Group Size ($G=4$)</strong>: For this prompt, the model samples $G=4$ completion rollouts $\{y_1, y_2, y_3, y_4\}$:</li>
+</ul>
+<pre><code>y1 (Perfect CoT &amp; Answer):
+&quot;\lt think&gt;Speed = 120 / 1.5 = 80 km/h. To convert to m/s: 80 * (5/18) = 22.22 m/s.\lt /think&gt;\lt answer&gt;22.22 m/s\lt /answer&gt;&quot;
+
+y2 (Incomplete: stopped at km/h):
+&quot;\lt think&gt;Speed = 120 / 1.5 = 80 km/h.\lt /think&gt;\lt answer&gt;80\lt /answer&gt;&quot;
+
+y3 (Correct Answer, Missing \lt think&gt; tags):
+&quot;22.22 m/s&quot;
+
+y4 (Complete Hallucination):
+&quot;\lt think&gt;120 * 1.5 = 180 m/s\lt /think&gt;\lt answer&gt;180 m/s\lt /answer&gt;&quot;
+</code></pre>
+<hr />
+<h3 id="33-step-1-multi-reward-evaluation-mathinlineindex98end">3.3 Step 1: Multi-Reward Evaluation ($R_i$)</h3>
+<p>Each generated rollout $y_i$ is evaluated by our 4 domain-aware reward functions (<code>format_reward</code>, <code>correctness_reward</code>, <code>instruction_reward</code>, <code>length_reward</code>):</p>
+<ul>
+<li><strong>Completion $y_1$</strong>: Exact XML tags (+0.50) + Factual correctness (+1.00) $\implies \mathbf{R_1 = +1.50}$</li>
+<li><strong>Completion $y_2$</strong>: Exact XML tags (+0.40) + Wrong unit answer (-0.50) $\implies \mathbf{R_2 = -0.10}$</li>
+<li><strong>Completion $y_3$</strong>: Missing tags (-0.50) + Factual correctness (+1.00) $\implies \mathbf{R_3 = +0.50}$</li>
+<li><strong>Completion $y_4$</strong>: Valid tags (+0.20) + Wrong answer (-0.50) $\implies \mathbf{R_4 = -0.30}$</li>
+</ul>
+<p><strong>Raw Reward Vector</strong>: $\mathbf{R = \{+1.50, \; -0.10, \; +0.50, \; -0.30\}}$</p>
+<hr />
+<h3 id="34-step-2-group-baseline-relative-advantage-calculation-mathinlineindex109end">3.4 Step 2: Group Baseline &amp; Relative Advantage Calculation ($A_i$)</h3>
+<p>GRPO <strong>eliminates the need for a separate Critic / Value Model</strong> (saving 50% VRAM) by using the group itself as a baseline benchmark.</p>
+<h4 id="1-calculate-group-mean-mathinlineindex110end-and-standard-deviation-mathinlineindex111end">1. Calculate Group Mean ($\mu$) and Standard Deviation ($\sigma$):</h4>
+<p>$$\mu = \frac{+1.50 - 0.10 + 0.50 - 0.30}{4} = \mathbf{+0.40}$$
+$$\sigma = \sqrt{\frac{(1.50-0.40)^2 + (-0.10-0.40)^2 + (0.50-0.40)^2 + (-0.30-0.40)^2}{4}} \approx \mathbf{0.70}$$</p>
+<h4 id="2-compute-relative-group-advantage-mathinlineindex112end">2. Compute Relative Group Advantage ($A_i = \frac{R_i - \mu}{\sigma + \epsilon}$):</h4>
+<ul>
+<li><strong>$A_1$ (Completion $y_1$)</strong>: $\frac{1.50 - 0.40}{0.70} = \mathbf{+1.57}$ $\implies$ <strong>Above Average! (Positive Reinforcement)</strong></li>
+<li><strong>$A_2$ (Completion $y_2$)</strong>: $\frac{-0.10 - 0.40}{0.70} = \mathbf{-0.71}$ $\implies$ <strong>Below Average! (Negative Suppression)</strong></li>
+<li><strong>$A_3$ (Completion $y_3$)</strong>: $\frac{0.50 - 0.40}{0.70} = \mathbf{+0.14}$ $\implies$ <strong>Slightly Above Average!</strong></li>
+<li><strong>$A_4$ (Completion $y_4$)</strong>: $\frac{-0.30 - 0.40}{0.70} = \mathbf{-1.00}$ $\implies$ <strong>Below Average! (Negative Suppression)</strong></li>
+</ul>
+<hr />
+<h3 id="35-step-3-token-credit-assignment-probability-ratio-calculation-mathinlineindex129end">3.5 Step 3: Token Credit Assignment &amp; Probability Ratio Calculation ($r_{i,t}$)</h3>
+<h4 id="what-is-mathinlineindex130end">What is $y_{i,t}$?</h4>
+<p>$y_{i,t}$ is <strong>any token generated by the model</strong> during rollout at position $t$ (reasoning text, numbers, symbols, XML tags).</p>
+<h4 id="reinforce-credit-assignment">REINFORCE Credit Assignment:</h4>
+<p>Since completion $y_1$ achieved $A_1 = +1.57$, <strong>every single generated token $y_{1,t}$ in $y_1$</strong> (including <code>\lt think&gt;</code>, <code>120/1.5</code>, <code>80</code>, <code>22.22</code>, <code>\lt answer&gt;</code>) inherits advantage $A_1 = +1.57$!</p>
+<p>During the weight update step, we pass prompt $x$ + completion $y_i$ into the active policy $\pi_\theta$ and measure how the token probability shifted relative to the sampling policy $\pi_{\theta_{\text{old}}}$:</p>
+<p>$$r_{i,t}(\theta) = \frac{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})}{\pi_{\theta_{\text{old}}}(y_{i,t} \mid x, y_{i,\lt t})}$$</p>
+<ul>
+<li><strong>$r_{i,t} > 1.0$</strong>: Current weights $\theta$ make token $y_{i,t}$ <strong>more probable</strong>.</li>
+<li><strong>$r_{i,t} < 1.0$</strong>: Current weights $\theta$ make token $y_{i,t}$ <strong>less probable</strong>.</li>
+</ul>
+<hr />
+<h3 id="36-step-4-bounded-updates-via-asymmetric-ratio-clipping-mathinlineindex148end">3.6 Step 4: Bounded Updates via Asymmetric Ratio Clipping ($\epsilon_{\text{low}}, \epsilon_{\text{high}}$)</h3>
+<p>To prevent single high-reward rollouts from causing gradient explosions, GRPO applies <strong>pessimistic clipping</strong>:</p>
+<p>$$\text{Clipped Objective}_{i,t} = \min \left( r_{i,t}(\theta) A_i, \; \text{clip}(r_{i,t}(\theta), 1 - \epsilon_{\text{low}}, 1 + \epsilon_{\text{high}}) A_i \right)$$</p>
+<ul>
+<li>For positive advantage ($A_1 = +1.57$), ratio growth is capped at $1 + \epsilon_{\text{high}} = 1.28$. The policy cannot increase token probability by more than 28% in a single step.</li>
+<li>For negative advantage ($A_4 = -1.00$), ratio drop is capped at $1 - \epsilon_{\text{low}} = 0.80$.</li>
+</ul>
+<hr />
+<h3 id="37-step-5-schulman-per-token-kl-penalty-mathinlineindex153end-loss-minimization">3.7 Step 5: Schulman Per-Token KL Penalty ($D_{\text{KL}}$) &amp; Loss Minimization</h3>
+<p>To ensure the policy $\pi_\theta$ does not drift into reward-hacking fluff, we subtract a per-token Kullback-Leibler (KL) divergence penalty relative to the frozen reference warmup model $\pi_{\text{ref}}$:</p>
+<p>$$D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_{i,t})}{\pi_\theta(y_{i,t})} - \log \frac{\pi_{\text{ref}}(y_{i,t})}{\pi_\theta(y_{i,t})} - 1$$</p>
+<h4 id="full-loss-objective-equation-mathinlineindex156end">Full Loss Objective Equation ($\mathcal{L}_{\text{GRPO}}$):</h4>
+<p>$$\mathcal{L}_{\text{GRPO}}(\theta) = -\frac{1}{G} \sum_{i=1}^{G} \frac{1}{|y_i|} \sum_{t=1}^{|y_i|} \left[ \min \left( r_{i,t} A_i, \; \text{clip}(r_{i,t}, 1-\epsilon_{\text{low}}, 1+\epsilon_{\text{high}}) A_i \right) \right] + \beta D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$$</p>
+<h4 id="how-pytorch-minimizes-loss-mathinlineindex157end">How PyTorch Minimizes Loss ($\mathcal{L}_{\text{GRPO}}$):</h4>
+<p>Notice the <strong>minus sign</strong> (<code>-</code>) in front of the advantage term:
+- <strong>For Correct Completion $y_1$ ($A_1 = +1.57$)</strong>: Loss contribution is $-1.57 \cdot r_{1,t}$. PyTorch minimizes loss by <strong>increasing $r_{1,t}$</strong> $\implies$ <strong>Probabilities of correct tokens GO UP!</strong>
+- <strong>For Wrong Completion $y_4$ ($A_4 = -1.00$)</strong>: Loss contribution is $+1.00 \cdot r_{4,t}$. PyTorch minimizes loss by <strong>decreasing $r_{4,t}$</strong> $\implies$ <strong>Probabilities of wrong tokens GO DOWN!</strong></p>
+<p>During <code>loss.backward()</code>, PyTorch computes parameter gradients:
+$$\nabla_W \mathcal{L}(\theta) = \frac{\partial \mathcal{L}_{\text{GRPO}}(\theta)}{\partial W}$$</p>
+<p>and fused AdamW updates LoRA matrices $A$ and $B$:
+$$W \leftarrow W - \eta \cdot \text{AdamW}\left( \nabla_W \mathcal{L}(\theta) \right)$$</p>
+<hr />
+<h3 id="38-reward-hacking-mechanics-vulnerabilities-and-production-mitigations-in-our-grpo-pipeline">3.8 Reward Hacking: Mechanics, Vulnerabilities, and Production Mitigations in Our GRPO Pipeline</h3>
+<h4 id="1-what-is-reward-hacking-in-our-grpo-setup">1. What is Reward Hacking in Our GRPO Setup?</h4>
+<p>In our reinforcement learning pipeline (<code>04_modal_qwen_2_5_1_5b_grpo.ipynb</code>), <strong>Reward Hacking</strong> (specification gaming) occurs when Qwen2.5-1.5B discovers degenerate token generation patterns that maximize the scalar outputs of our 4 reward functions (<code>format_reward</code>, <code>correctness_reward</code>, <code>instruction_reward</code>, <code>length_reward</code>) without actually solving the underlying reasoning task.</p>
+<p>Because GRPO samples $G=8$ completion rollouts $\{y_1, y_2, \ldots, y_8\}$ per prompt and normalizes rewards relative to the group mean ($A_i = \frac{R_i - \mu}{\sigma + \epsilon}$), if one rollout discovers a shortcut that inflates its scalar reward $R_i$, it receives a high positive advantage $A_i > 0$. Without strict constraints, the policy gradient rapidly amplifies this degenerate shortcut across subsequent optimizer steps.</p>
+<h4 id="2-specific-vulnerability-modes-analyzed-in-our-4-reward-functions">2. Specific Vulnerability Modes Analyzed in Our 4 Reward Functions:</h4>
+<ul>
+<li><strong>Mode A: Verbosity &amp; Padding Spooling in <code>format_reward</code></strong>:</li>
+<li><em>Vulnerability</em>: <code>format_reward</code> awards $+0.15$ if the reasoning text inside <code>\lt think&gt;...\lt /think&gt;</code> contains $\ge 50$ words.</li>
+<li><em>Hacking Pattern</em>: The model learns to spool repetitive filler tokens (e.g. <em>"Let me think about this carefully. Let me re-read the prompt. Let me check my math again. Let me verify..."</em>) to easily pass the 50-word threshold without performing actual reasoning.</li>
+<li><strong>Mode B: Option Flooding in <code>correctness_reward</code> (Exact / MCQ Domain)</strong>:</li>
+<li><em>Vulnerability</em>: For ARC-Challenge multiple-choice prompts (<code>answer_type="exact"</code>), <code>correctness_reward</code> uses regular expressions <code>\b([ABCD])\b</code> to extract candidate letters inside <code>\lt answer&gt;...\lt /answer&gt;</code>.</li>
+<li><em>Hacking Pattern</em>: The policy attempts to output all candidate letters (<code>\lt answer&gt;The answer is A, or maybe B, C, D\lt /answer&gt;</code>) to guarantee regex matching.</li>
+<li><strong>Mode C: Boolean Dual-Answer Injection in <code>correctness_reward</code> (StrategyQA Domain)</strong>:</li>
+<li><em>Vulnerability</em>: Evaluates whether <code>"yes"</code> or <code>"no"</code> appears in the answer.</li>
+<li><em>Hacking Pattern</em>: Outputting <code>"yes and no"</code> to trick naive substring inclusion checks.</li>
+<li><strong>Mode D: Runaway Output Spooling</strong>:</li>
+<li><em>Vulnerability</em>: Generating infinite repetitive loops to delay completion and avoid EOS tokens.</li>
+</ul>
+<h4 id="3-our-5-layer-production-mitigation-architecture-04_modal_qwen_2_5_1_5b_grpoipynb">3. Our 5-Layer Production Mitigation Architecture (<code>04_modal_qwen_2_5_1_5b_grpo.ipynb</code>):</h4>
+<ol>
+<li>
+<p><strong>Schulman Per-Token KL Divergence Penalty ($\beta = 0.001$)</strong>:
+   Tracks how far the active policy $\pi_\theta$ strays from the reference warmup model $\pi_{\text{ref}}$ (<code>Qwen2.5-1.5B-reasoning-warmup-merged</code>). If the model begins spooling fluff tokens or altering syntactic structure to hack rewards, $D_{\text{KL}}$ spikes. At $\beta = 0.001$, a KL spike directly subtracts from the advantage, neutralizing hacked reward gains:
+   $$D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - \log \frac{\pi_{\text{ref}}(y_{i,t} \mid x, y_{i,\lt t})}{\pi_\theta(y_{i,t} \mid x, y_{i,\lt t})} - 1$$</p>
+</li>
+<li>
+<p><strong>Asymmetric DAPO Loss Clipping ($\epsilon_{\text{low}} = 0.2, \epsilon_{\text{high}} = 0.28$)</strong>:
+   Limits the probability ratio $r_{i,t}(\theta) = \frac{\pi_\theta}{\pi_{\theta_{\text{old}}}}$. Even if a hacked completion achieves a high scalar reward, DAPO limits maximum gradient step sizes to $1.28 \times A_i$, preventing single degenerate rollouts from destroying model weights.</p>
+</li>
+<li>
+<p><strong>Multi-Reward Counter-Balancing</strong>:
+   Our 4 reward functions act as counter-weights against one another:</p>
+</li>
+<li>If a model inflates verbosity inside <code>\lt think&gt;</code>, <code>length_reward</code> penalizes completions over 2500 words ($-0.25$).</li>
+<li>
+<p>If the model sacrifices solution accuracy to inflate formatting, <code>correctness_reward</code> penalizes incorrect outputs ($-0.50$), overwhelming the $+0.15$ format bonus.</p>
+</li>
+<li>
+<p><strong>Strict Domain-Specific Regex Anchoring in <code>correctness_reward</code></strong>:</p>
+</li>
+<li><code>_extract_answer()</code> isolates <em>only</em> text strictly enclosed between <code>\lt answer&gt;</code> and <code>\lt /answer&gt;</code>.</li>
+<li>For <code>exact</code> MCQ tasks, <code>re.fullmatch(r"[A-D]", gold_upper)</code> enforces single-letter extraction.</li>
+<li>
+<p>For <code>bool</code> tasks, <code>yes_match and not no_match</code> explicitly penalizes ambiguous dual-answer outputs like <code>"yes and no"</code>.</p>
+</li>
+<li>
+<p><strong><code>mask_truncated_completions = True</code> &amp; Length Guards</strong>:</p>
+</li>
+<li>Discards rollouts that hit <code>max_completion_length = 1536</code> without an <code>\lt |im_end|&gt;</code> EOS token, ensuring runaway loops cannot contribute positive policy gradients.</li>
+<li><code>length_reward</code> penalizes under-reasoning ($<15$ words: $-0.50$).</li>
+</ol>
+<hr />
+<h2 id="4-technical-interpretation-of-all-grpo-training-metrics-plots">4. Technical Interpretation of ALL GRPO Training Metrics &amp; Plots</h2>
+<p>Monitoring Weights &amp; Biases (W&amp;B) diagnostic plots is crucial during GRPO reinforcement learning to verify training health and detect policy anomalies.</p>
+<p><img alt="GRPO RL Training Diagnostics" src="grpo_all_plots.png" /></p>
+<h3 id="41-detailed-breakdown-of-the-6-diagnostic-training-panels">4.1 Detailed Breakdown of the 6 Diagnostic Training Panels</h3>
+<h4 id="panel-1-dapo-policy-loss-optimization-stability">Panel 1: DAPO Policy Loss &amp; Optimization Stability</h4>
+<ul>
+<li><strong>What it Measures</strong>: Plots the DAPO policy gradient loss $\mathcal{L}_{\text{GRPO}}$ across 600 training steps.</li>
+<li><strong>How to Interpret</strong>: Healthy training displays a sharp drop in loss during the first 100 steps as the model aligns with format requirements, followed by bounded oscillation between $[-0.1, +0.2]$. Persistent positive loss values ($>2.0$) signal gradient instability or an aggressive learning rate.</li>
+</ul>
+<h4 id="panel-2-kl-divergence-mathinlineindex193end-policy-drift">Panel 2: KL Divergence $D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$ &amp; Policy Drift</h4>
+<ul>
+<li><strong>What it Measures</strong>: Tracks Kullback-Leibler divergence between current policy $\pi_\theta$ and frozen base reference model $\pi_{\text{ref}}$.</li>
+<li><strong>How to Interpret</strong>: Normal policy updates remain bounded within $0.001 \le D_{\text{KL}} \le 0.05$. The red dashed line illustrates <strong>Policy Collapse / Reward Hacking</strong>, where KL divergence spikes exponentially as the model degenerates to exploit reward loopholes.</li>
+</ul>
+<h4 id="panel-3-total-mean-reward-trajectory">Panel 3: Total Mean Reward Trajectory</h4>
+<ul>
+<li><strong>What it Measures</strong>: Displays total composite reward score $R_{\text{total}} = R_{\text{format}} + R_{\text{correctness}} + R_{\text{instruction}} + R_{\text{length}}$.</li>
+<li><strong>How to Interpret</strong>: Demonstrates monotonic growth from initial negative scores ($-0.2$) up toward target performance ceiling ($+1.5+$), confirming effective policy learning.</li>
+</ul>
+<h4 id="panel-4-component-rewards-breakdown">Panel 4: Component Rewards Breakdown</h4>
+<ul>
+<li><strong>What it Measures</strong>: Deconstructs composite reward into individual reward curves ($R_{\text{format}}$, $R_{\text{correctness}}$, $R_{\text{length}}$).</li>
+<li><strong>How to Interpret</strong>: <code>format_reward</code> (blue curve) saturates near maximum (+0.60) within 40 steps, while <code>correctness_reward</code> (green curve) grows steadily over 600 steps as complex reasoning improves.</li>
+</ul>
+<h4 id="panel-5-reasoning-chain-length-dynamics">Panel 5: Reasoning Chain Length Dynamics</h4>
+<ul>
+<li><strong>What it Measures</strong>: Tracks average generated token length per response across steps.</li>
+<li><strong>How to Interpret</strong>: Shows dynamic expansion of token count from ~210 tokens up to ~950 tokens as the model spontaneously develops step-by-step Chain-of-Thought (CoT) reasoning inside <code>\lt think&gt;</code> tags.</li>
+</ul>
+<h4 id="panel-6-gradient-norm-mathinlineindex203end-stability">Panel 6: Gradient Norm $\|g\|_2$ &amp; Stability</h4>
+<ul>
+<li><strong>What it Measures</strong>: Measures the $L_2$ norm of model parameter gradients before optimizer step execution.</li>
+<li><strong>How to Interpret</strong>: High initial gradient norms ($>4.0$) stabilize below 1.0. Gradient clipping (<code>max_grad_norm=1.0</code>) prevents destabilizing weight updates.</li>
+</ul>
+<hr />
+<h2 id="5-offline-distillation-loss-function-deep-dive">5. Offline Distillation &amp; Loss Function Deep-Dive</h2>
+<h3 id="51-offline-distillation-mechanics">5.1 Offline Distillation Mechanics</h3>
+<p>In our pipeline, offline distillation transfers reasoning capabilities from a 105-Billion parameter teacher model (<code>Sarvam-105b-Distill-100k</code>) to our 1.5-Billion parameter student model (<code>Lily-1.5B</code>).</p>
+<p>Unlike online distillation (which requires loading teacher and student models simultaneously in GPU VRAM to match output logits), <strong>offline distillation</strong> utilizes pre-generated high-quality Chain-of-Thought reasoning trajectories stored as static dataset text.</p>
+<pre><code>[ Sarvam 105B Teacher ] ---&gt; Pre-computes 100k CoT Trajectories ---&gt; HF Hub Dataset
+                                                                          |
+[ Lily 1.5B Student ] \lt --- Supervised Fine-Tuning (CE Loss) \lt -------------+
+</code></pre>
+<h3 id="52-token-level-cross-entropy-loss-formulation-comprehensive-theory-mechanics">5.2 Token-Level Cross-Entropy Loss Formulation: Comprehensive Theory &amp; Mechanics</h3>
+<h4 id="1-what-does-cross-entropy-loss-measure">1. What Does Cross-Entropy Loss Measure?</h4>
+<p>Cross-Entropy (CE) Loss measures the <strong>information-theoretic discrepancy</strong> (or negative log-likelihood) between the true target token distribution $P_{\text{target}}(y_t)$ (the teacher model's completion, represented as a 1-hot target vector over the vocabulary $V$) and the student model's predicted probability distribution $P_\theta(y_t \mid y_{\lt t}, x)$.</p>
+<p>Mathematically, Cross-Entropy between true distribution $P$ and predicted distribution $Q$ is:
+$$H(P, Q) = -\sum_{v \in V} P(v) \log Q(v) = H(P) + D_{\text{KL}}(P \| Q)$$</p>
+<p>Since the ground-truth target is a deterministic one-hot vector ($H(P) = 0$), minimizing Cross-Entropy Loss is <strong>mathematically identical to minimizing the KL divergence</strong> $D_{\text{KL}}(P_{\text{teacher}} \| P_{\text{student}})$ between the teacher's distribution and the student's predictions!</p>
+<h4 id="2-how-is-token-level-cross-entropy-loss-calculated-step-by-step">2. How is Token-Level Cross-Entropy Loss Calculated Step-by-Step?</h4>
+<ol>
+<li><strong>Logit Computation</strong>: The student model passes input context $x$ and preceding tokens $y_{\lt t}$ through its Transformer layers to produce unnormalized logit vectors $z_t \in \mathbb{R}^{|V|}$ (where vocabulary size $|V| = 151,936$).</li>
+<li><strong>Softmax Normalization</strong>: Logits are converted into a probability distribution via Softmax:
+   $$P_\theta(y_t = k \mid y_{\lt t}, x) = \frac{\exp(z_{t,k})}{\sum_{j=1}^{|V|} \exp(z_{t,j})}$$</li>
+<li><strong>Target Surprisal Calculation</strong>: The loss for target token $y_t$ is its negative log probability: $-\log P_\theta(y_t \mid y_{\lt t}, x)$.</li>
+<li><strong>Label Masking ($m_t$)</strong>: Prompt tokens are assigned <code>labels = -100</code> ($m_t = 0$), ensuring zero gradient computation over prompt tokens. Assistant completion tokens are assigned target token IDs ($m_t = 1$).</li>
+<li><strong>Masked Sequence Loss Formulation</strong>:
+   $$\mathcal{L}_{\text{CE}}(\theta) = -\frac{1}{\sum_{t=1}^T m_t} \sum_{t=1}^{T} m_t \cdot \log P_\theta(y_t \mid y_{\lt t}, x)$$</li>
+</ol>
+<hr />
+<h3 id="53-sequence-packing-mechanics-memory-layout-efficiency-gains">5.3 Sequence Packing Mechanics: Memory Layout &amp; Efficiency Gains</h3>
+<h4 id="1-the-problem-with-naive-batch-padding">1. The Problem with Naive Batch Padding</h4>
+<p>In standard PyTorch DataLoaders, sequences in a batch are padded with <code>\lt pad&gt;</code> tokens to match the length of the longest sequence in that batch. In Chain-of-Thought (CoT) distillation datasets where response lengths vary from 200 to 3,800 tokens, up to <strong>85% of VRAM and GPU Tensor Core compute is wasted</strong> multiplying zeros for padding tokens!</p>
+<h4 id="2-how-sequence-packing-works-packingtrue-in-notebook-07">2. How Sequence Packing Works (<code>packing=True</code> in Notebook 07)</h4>
+<p>Sequence Packing concatenates multiple individual text samples into a single contiguous token array of fixed length <code>MAX_SEQ_LENGTH = 4096</code>. Samples are separated by <code>\lt |im_end|&gt;</code> special tokens.</p>
+<pre><code>Unpacked Batch (Wasteful Padding):
+[Sample 1 (500 tokens) | \lt pad&gt; \lt pad&gt; ... (3596 pad tokens)] -&gt; 87% VRAM Wasted!
+[Sample 2 (1200 tokens)| \lt pad&gt; \lt pad&gt; ... (2896 pad tokens)] -&gt; 70% VRAM Wasted!
+
+Packed Sequence (100% Compute Efficiency):
+[Sample 1 (500t) \lt |im_end|&gt; Sample 2 (1200t) \lt |im_end|&gt; Sample 3 (2394t)] -&gt; 0% Wasted!
+</code></pre>
+<h4 id="3-attention-masking-in-packed-sequences">3. Attention Masking in Packed Sequences</h4>
+<p>To prevent attention leakage across concatenated samples inside a packed sequence, Unsloth utilizes <strong>Block-Diagonal Attention Masking</strong> (FlashAttention-2 cumulative sequence indexing <code>cu_seqlens</code>), ensuring token $t$ in Sample 2 can only attend to preceding tokens within Sample 2.</p>
+<h4 id="4-empirical-efficiency-outcomes">4. Empirical Efficiency Outcomes:</h4>
+<p>From <code>07_modal_lily_1_5b_distill.ipynb</code> execution logs:
+- Raw Dataset: <strong>91,457 individual text samples</strong>.
+- Packed Dataset: <strong>33,297 packed sequences of length 4,000</strong>.
+- Throughput Boost: <strong>&gt;2.4x acceleration</strong>, completing 2 full distillation epochs in 5h 14m on a single A100 40GB GPU.</p>
+<hr />
+<h2 id="6-model-evaluation-benchmarking-schema-verification">6. Model Evaluation, Benchmarking &amp; Schema Verification</h2>
+<h3 id="61-lm-eval-harness-execution-configuration">6.1 <code>lm-eval</code> Harness Execution &amp; Configuration</h3>
+<p>In <code>05_modal_lily_1_5b_eval.ipynb</code> (v0.1) and <code>08_modal_lily_1_5b_v03_eval.ipynb</code> (v0.3), we execute standard multi-benchmark evaluations via <code>lm-evaluation-harness</code>.</p>
+<h4 id="command-line-invocations-modal-a100-l4">Command Line Invocations (Modal A100 &amp; L4)</h4>
+<pre><code class="language-bash"># Notebook 08 (Lily 1.5b v0.3 Evaluation)
+lm_eval \
+  --model hf \
+  --model_args pretrained=abhinav0231/Lily-1.5b-v0.3,dtype=bfloat16,trust_remote_code=True,attn_implementation=sdpa \
+  --tasks hellaswag,arc_challenge,mmlu,mmlu_redux_generative,gsm8k,ifeval \
+  --batch_size 16 \
+  --apply_chat_template \
+  --device cuda:0 \
+  --use_cache /root/lily-eval-runs/cache/group1.db \
+  --output_path /root/lily-eval-runs/results/group1
+</code></pre>
+<h4 id="benchmark-overview">Benchmark Overview</h4>
+<ol>
+<li><strong>GSM8K</strong>: Grade school math word problems (measures multi-step numerical reasoning).</li>
+<li><strong>ARC-Challenge</strong>: AI2 Reasoning Challenge (grade-school science questions requiring logic).</li>
+<li><strong>HellaSwag</strong>: Sentence completion benchmark evaluating commonsense NLI.</li>
+<li><strong>MMLU / MMLU-Redux</strong>: 57 academic subjects (elementary math, physics, humanities, law).</li>
+<li><strong>IFEval</strong>: Instruction-Following Evaluation (evaluates formatting constraints like word counts, JSON format, bullet counts).</li>
+</ol>
+<h3 id="62-schema-compliance-verification-framework">6.2 Schema Compliance Verification Framework</h3>
+<p>In <code>09_colab_lily_1_5b_v03_inference.ipynb</code>, we built a programmatic schema verification engine to audit whether quantized models maintain strict <code>\lt think&gt;</code> and <code>\lt answer&gt;</code> tag structures.</p>
+<pre><code class="language-python">def extract_stats(text):
+    return {
+        &quot;think_open&quot;:     text.count(&quot;\lt think&gt;&quot;),
+        &quot;think_close&quot;:    text.count(&quot;\lt /think&gt;&quot;),
+        &quot;answer_open&quot;:    text.count(&quot;\lt answer&gt;&quot;),
+        &quot;answer_close&quot;:   text.count(&quot;\lt /answer&gt;&quot;),
+        &quot;thinking_leak&quot;:  text.count(&quot;\lt thinking&gt;&quot;), # Audit tag leakage
+        &quot;im_end&quot;:         text.count(&quot;\lt |im_end|&gt;&quot;)
+    }
+
+def classify_case(raw_stats):
+    if raw_stats[&quot;think_open&quot;] == 1 and raw_stats[&quot;think_close&quot;] == 1 \
+       and raw_stats[&quot;answer_open&quot;] == 1 and raw_stats[&quot;answer_close&quot;] == 1 \
+       and raw_stats[&quot;thinking_leak&quot;] == 0:
+        return &quot;PASS_exact&quot;
+    elif raw_stats[&quot;thinking_leak&quot;] &gt; 0:
+        return &quot;FAIL_thinking_leak&quot;
+    elif raw_stats[&quot;think_open&quot;] == 1 and raw_stats[&quot;answer_open&quot;] == 0:
+        return &quot;PARTIAL_only_think&quot;
+    else:
+        return &quot;FAIL_no_schema&quot;
+</code></pre>
+<hr />
+<h2 id="7-model-export-quantization-gguf-conversion">7. Model Export, Quantization &amp; GGUF Conversion</h2>
+<h3 id="71-gguf-container-format-quantization-theory">7.1 GGUF Container Format &amp; Quantization Theory</h3>
+<p><strong>GGUF (GGML Unified Format)</strong> is a binary file format designed for fast, single-file model loading on edge devices (CPU/GPU via <code>llama.cpp</code>).
+Quantization reduces 16-bit float weight representations down to lower bit-widths (4-bit, 5-bit, 8-bit) using block-wise scaling factor quantization:</p>
+<p>$$w \approx s \cdot q + m$$</p>
+<p>where $q$ is the quantized $k$-bit integer, $s$ is the block scale factor, and $m$ is the zero-point offset.</p>
+<h3 id="72-the-2-export-pipelines-in-our-codebase">7.2 The 2 Export Pipelines in Our Codebase</h3>
+<h4 id="pipeline-a-unsloth-direct-export-07_modal_lily_1_5b_distillipynb">Pipeline A: Unsloth Direct Export (<code>07_modal_lily_1_5b_distill.ipynb</code>)</h4>
+<pre><code class="language-python"># Exports GGUF files directly from Unsloth engine
+model_m.save_pretrained_gguf(&quot;gguf_model&quot;, tok_m, quantization_method=&quot;q4_k_m&quot;)
+</code></pre>
+<h4 id="pipeline-b-manual-llamacpp-cli-pipeline-10_colab_lily_1_5b_v03_distill_ggufipynb">Pipeline B: Manual <code>llama.cpp</code> CLI Pipeline (<code>10_colab_lily_1_5b_v03_distill_gguf.ipynb</code>)</h4>
+<ol>
+<li><strong>System Prompt Patching</strong>: Replaces base Qwen system templates with our standardized CoT system prompt across <code>config.json</code> and tokenizer files.</li>
+<li><strong>F16 GGUF Conversion</strong>:
+   <code>bash
+   python llama.cpp/convert_hf_to_gguf.py \
+     /content/Lily-1.5b-v0.3 \
+     --outtype f16 \
+     --outfile /content/Lily-1.5b-v0.3-F16.gguf</code></li>
+<li><strong>K-Quantization Execution</strong>:
+   <code>bash
+   llama.cpp/build/bin/llama-quantize /content/Lily-1.5b-v0.3-F16.gguf /content/Lily-1.5b-v0.3-Q4_K_M.gguf Q4_K_M
+   llama.cpp/build/bin/llama-quantize /content/Lily-1.5b-v0.3-F16.gguf /content/Lily-1.5b-v0.3-Q5_K_M.gguf Q5_K_M
+   llama.cpp/build/bin/llama-quantize /content/Lily-1.5b-v0.3-F16.gguf /content/Lily-1.5b-v0.3-Q8_0.gguf Q8_0</code></li>
+</ol>
+<h4 id="quantization-variant-comparison-matrix">Quantization Variant Comparison Matrix</h4>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Quantization Method</th>
+<th>File Size (1.5B Model)</th>
+<th>VRAM Required</th>
+<th>Recommended Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>F16</code></strong></td>
+<td>Unquantized FP16</td>
+<td>3.09 GB</td>
+<td>~4.2 GB</td>
+<td>Baseline reference evaluation</td>
+</tr>
+<tr>
+<td><strong><code>Q8_0</code></strong></td>
+<td>8-bit Standard Quant</td>
+<td>1.62 GB</td>
+<td>~2.5 GB</td>
+<td>Server-side high-precision inference</td>
+</tr>
+<tr>
+<td><strong><code>Q5_K_M</code></strong></td>
+<td>5-bit K-Quant (Medium)</td>
+<td>1.12 GB</td>
+<td>~1.8 GB</td>
+<td>Optimal quality/memory balance</td>
+</tr>
+<tr>
+<td><strong><code>Q4_K_M</code></strong></td>
+<td>4-bit K-Quant (Medium)</td>
+<td>0.98 GB</td>
+<td>~1.5 GB</td>
+<td>Mobile / Edge CPU deployment</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-multimodal-vision-extension-lily-vision">8. Multimodal Vision Extension (Lily Vision)</h2>
+<h3 id="81-vlm-architecture-dimensionality-pipeline">8.1 VLM Architecture &amp; Dimensionality Pipeline</h3>
+<p>Our Vision-Language Model <strong>Lily Vision</strong> (<code>11</code>, <code>12</code>, <code>13</code>) connects a pre-trained Vision Tower to the Lily 1.5B LLM via a 2-layer projection bottleneck:</p>
+<pre><code class="language-python"># Projector Architecture Implementation (12_lily-vision-phase1-alignment-v5.ipynb)
+class LilyVisionProjector(nn.Module):
+    def __init__(self, vision_dim=1152, llm_dim=1536):
+        super().__init__()
+        self.downsampler = nn.AdaptiveAvgPool2d((18, 18)) # 18x18 = 324 tokens
+        self.mlp = nn.Sequential(
+            nn.Linear(vision_dim, 2048),
+            nn.SiLU(),
+            nn.Linear(2048, llm_dim)
+        )
+
+    def forward(self, x): # x: [B, 729, 1152]
+        B, N, C = x.shape
+        H = W = int(N ** 0.5) # 27x27 grid
+        x_2d = x.transpose(1, 2).view(B, C, H, W)
+        x_pooled = self.downsampler(x_2d).flatten(2).transpose(1, 2) # [B, 324, 1152]
+        return self.mlp(x_pooled) # [B, 324, 1536]
+</code></pre>
+<h3 id="82-phase-1-alignment-vs-phase-2-sft-layer-freezing-matrix">8.2 Phase 1 Alignment vs Phase 2 SFT — Layer Freezing Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Architecture Submodule</th>
+<th>Phase 1: Projector Alignment (12)</th>
+<th>Phase 2: Multimodal SFT (13)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SigLIP-2 Vision Encoder</strong></td>
+<td>❄️ <strong>Frozen</strong> (<code>requires_grad = False</code>)</td>
+<td>❄️ <strong>Frozen</strong> (<code>requires_grad = False</code>, set to <code>.eval()</code>)</td>
+</tr>
+<tr>
+<td><strong>2-Layer MLP Projector</strong></td>
+<td>🔥 <strong>Trained</strong> (Random init, LR = $2 \times 10^{-4}$)</td>
+<td>🔥 <strong>Trained</strong> (From Phase 1 weights, LR = $2 \times 10^{-5}$)</td>
+</tr>
+<tr>
+<td><strong>LLM Base Weights</strong></td>
+<td>❄️ <strong>Frozen</strong> (<code>requires_grad = False</code>)</td>
+<td>❄️ <strong>Frozen</strong> (Loaded in 4-bit QLoRA)</td>
+</tr>
+<tr>
+<td><strong>LLM LoRA Adapters</strong></td>
+<td>N/A (No LoRA used)</td>
+<td>🔥 <strong>Trained</strong> ($r=32, \alpha=64$ on 7 layers)</td>
+</tr>
+<tr>
+<td><strong>Visual Token Count</strong></td>
+<td>324 tokens (Pooled via 18x18 adaptive pool)</td>
+<td><strong>729 tokens</strong> (Full 27x27 patch resolution)</td>
+</tr>
+<tr>
+<td><strong>Sequence Length</strong></td>
+<td>256 tokens</td>
+<td>3,072 tokens</td>
+</tr>
+</tbody>
+</table>
+<h3 id="83-lengthgroupedbatchsampler-performance-optimization">8.3 <code>LengthGroupedBatchSampler</code> Performance Optimization</h3>
+<p>In <code>13_lily-vision-phase2-sft.ipynb</code>, multimodal sequences vary drastically in token length. Standard batching causes massive padding overhead.
+We implemented a custom PyTorch batch sampler that groups sequences by length:</p>
+<pre><code class="language-python">class LengthGroupedBatchSampler(Sampler):
+    def __init__(self, lengths, batch_size, mega_batch_mult=50, seed=42):
+        self.lengths = lengths
+        self.batch_size = batch_size
+        self.mega_batch_size = batch_size * mega_batch_mult # 24 * 50 = 1200 samples
+
+    def __iter__(self):
+        # Partition into mega-batches, sort by sequence length, form mini-batches
+        pass
+</code></pre>
+<p><strong>Optimization Outcome</strong>: Reduced total Phase 2 SFT training duration from <strong>~3 hours down to ~20 minutes</strong> on an A100 40GB GPU.</p>
+<hr />
+<h2 id="9-cloud-checkpointing-fault-tolerant-auto-resumption">9. Cloud Checkpointing &amp; Fault-Tolerant Auto-Resumption</h2>
+<p>Across all cloud training notebooks (<code>02</code>, <code>04</code>, <code>07</code>, <code>12</code>, <code>13</code>), running on serverless infrastructure (Modal) presents a risk of preemption or timeout. We built custom Hugging Face Hub callbacks that automatically snapshot checkpoints to private repos and auto-resume on restart.</p>
+<pre><code class="language-python">from huggingface_hub import HfApi, snapshot_download
+
+# Auto-Resume Logic (07_modal_lily_1_5b_distill.ipynb)
+if RESUME_FROM_CHECKPOINT and CHECKPOINT_REPO:
+    api = HfApi()
+    files = list(api.list_repo_files(CHECKPOINT_REPO, token=HF_TOKEN))
+    ckpt_nums = [int(f.split(&quot;/&quot;)[0].split(&quot;-&quot;)[-1]) for f in files if &quot;checkpoint-&quot; in f]
+    if ckpt_nums:
+        latest = max(ckpt_nums)
+        local_dir = os.path.join(OUTPUT_DIR, f&quot;checkpoint-{latest}&quot;)
+        print(f&quot;Downloading latest checkpoint-{latest} from HF Hub...&quot;)
+        snapshot_download(
+            repo_id        = CHECKPOINT_REPO,
+            allow_patterns = [f&quot;checkpoint-{latest}/*&quot;],
+            local_dir      = OUTPUT_DIR,
+            token          = HF_TOKEN,
+        )
+        _resume_ckpt = local_dir
+</code></pre>
+<hr />
+<h2 id="conclusion-summary-checklist">Conclusion &amp; Summary Checklist</h2>
+<p>By combining <strong>PEFT (LoRA/QLoRA)</strong>, <strong>Hyperparameter Scaling Equations</strong>, <strong>GRPO Reinforcement Learning</strong>, <strong>Offline SFT Distillation</strong>, <strong>GGUF K-Quantization</strong>, and <strong>2-Phase Multimodal VLM Alignment</strong>, our codebase establishes a complete, production-grade LLM development framework.</p>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // Render Math equations via KaTeX
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: "$$", right: "$$", display: true},
+                    {left: "$", right: "$", display: false},
+                    {left: "\\(", right: "\\)", display: false},
+                    {left: "\[", right: "\]", display: true}
+                ],
+                throwOnError : false
+            });
+        }
+        document.body.classList.add("render-complete");
+    });
+</script>
+</body>
+</html>
