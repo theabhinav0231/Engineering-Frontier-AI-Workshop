@@ -532,39 +532,114 @@ $$W \leftarrow W - \eta \cdot \text{AdamW}\left( \nabla_W \mathcal{L}(\theta) \r
 </ol>
 <hr />
 <h2 id="4-technical-interpretation-of-all-grpo-training-metrics-plots">4. Technical Interpretation of ALL GRPO Training Metrics &amp; Plots</h2>
-<p>Monitoring Weights &amp; Biases (W&amp;B) diagnostic plots is crucial during GRPO reinforcement learning to verify training health and detect policy anomalies.</p>
+<p>Monitoring Weights &amp; Biases (W&amp;B) diagnostic plots is crucial during GRPO reinforcement learning to verify training health, reward optimization, and detect policy collapse or reward gaming.</p>
 <p><img alt="GRPO RL Training Diagnostics" src="assets/grpo_all_plots.png" /></p>
-<h3 id="41-detailed-breakdown-of-the-6-diagnostic-training-panels">4.1 Detailed Breakdown of the 6 Diagnostic Training Panels</h3>
-<h4 id="panel-1-dapo-policy-loss-optimization-stability">Panel 1: DAPO Policy Loss &amp; Optimization Stability</h4>
+
+<h3 id="41-overall-policy-reward-metrics">4.1 Overall Policy &amp; Reward Metrics</h3>
+<h4 id="1-trainreward-composite-mean-reward">1. <code>train/reward</code> (Composite Mean Reward)</h4>
 <ul>
-<li><strong>What it Measures</strong>: Plots the DAPO policy gradient loss $\mathcal{L}_{\text{GRPO}}$ across 600 training steps.</li>
-<li><strong>How to Interpret</strong>: Healthy training displays a sharp drop in loss during the first 100 steps as the model aligns with format requirements, followed by bounded oscillation between $[-0.1, +0.2]$. Persistent positive loss values ($>2.0$) signal gradient instability or an aggressive learning rate.</li>
+<li><strong>What it Measures</strong>: The total combined reward $R_{\text{total}} = R_{\text{format}} + R_{\text{correctness}} + R_{\text{instruction}} + R_{\text{length}}$ earned per step across all sampled rollout completions.</li>
+<li><strong>Healthy Behavior</strong>: Displays an upward trajectory over 600 training steps, starting near negative/zero baseline ($-0.2$) and progressing upward ($+0.8$ to $+1.5+$) as the model discovers better reasoning paths.</li>
 </ul>
-<h4 id="panel-2-kl-divergence-mathinlineindex192end-policy-drift">Panel 2: KL Divergence $D_{\text{KL}}(\pi_\theta \| \pi_{\text{ref}})$ &amp; Policy Drift</h4>
+
+<h4 id="2-trainreward_std-group-reward-variance">2. <code>train/reward_std</code> (Group Reward Variance)</h4>
 <ul>
-<li><strong>What it Measures</strong>: Tracks Kullback-Leibler divergence between current policy $\pi_\theta$ and frozen base reference model $\pi_{\text{ref}}$.</li>
-<li><strong>How to Interpret</strong>: Normal policy updates remain bounded within $0.001 \le D_{\text{KL}} \le 0.05$. The red dashed line illustrates <strong>Policy Collapse / Reward Hacking</strong>, where KL divergence spikes exponentially as the model degenerates to exploit reward loopholes.</li>
+<li><strong>What it Measures</strong>: The standard deviation of scalar rewards within each group of $G=4$ (or $G=8$) completions sampled per prompt.</li>
+<li><strong>Why it Matters</strong>: In GRPO, advantages are calculated as $A_i = \frac{R_i - \text{mean}(R)}{\text{std}(R) + \epsilon}$. If $\text{std} = 0$, all rollouts performed identically and no gradient update occurs ($A_i = 0$). Healthy training maintains steady standard deviation ($0.2 \le \sigma \le 0.8$), providing rich contrastive signals to distinguish good reasoning from poor reasoning.</li>
 </ul>
-<h4 id="panel-3-total-mean-reward-trajectory">Panel 3: Total Mean Reward Trajectory</h4>
+
+<h4 id="3-trainloss-dapo-policy-loss">3. <code>train/loss</code> (DAPO Policy Loss)</h4>
 <ul>
-<li><strong>What it Measures</strong>: Displays total composite reward score $R_{\text{total}} = R_{\text{format}} + R_{\text{correctness}} + R_{\text{instruction}} + R_{\text{length}}$.</li>
-<li><strong>How to Interpret</strong>: Demonstrates monotonic growth from initial negative scores ($-0.2$) up toward target performance ceiling ($+1.5+$), confirming effective policy learning.</li>
+<li><strong>What it Measures</strong>: The Dual-clip Advantage Policy Optimization (DAPO) surrogate policy gradient loss $\mathcal{L}_{\text{GRPO}}$.</li>
+<li><strong>How to Interpret</strong>: Unlike SFT where cross-entropy loss monotonically declines toward zero, RL policy loss naturally oscillates in a bounded range $[-0.1, +0.3]$ as the group baseline $\mu$ dynamically shifts upward with model capabilities.</li>
 </ul>
-<h4 id="panel-4-component-rewards-breakdown">Panel 4: Component Rewards Breakdown</h4>
+<hr />
+
+<h3 id="42-component-reward-functions-breakdown">4.2 Component Reward Functions Breakdown (Mean &amp; Std)</h3>
+<h4 id="1-trainrewardsformat_rewardmean-std">1. <code>train/rewards/format_reward/mean</code> &amp; <code>/std</code></h4>
 <ul>
-<li><strong>What it Measures</strong>: Deconstructs composite reward into individual reward curves ($R_{\text{format}}$, $R_{\text{correctness}}$, $R_{\text{length}}$).</li>
-<li><strong>How to Interpret</strong>: <code>format_reward</code> (blue curve) saturates near maximum (+0.60) within 40 steps, while <code>correctness_reward</code> (green curve) grows steadily over 600 steps as complex reasoning improves.</li>
+<li><strong>What it Measures</strong>: Verifies presence of <code>&lt;think&gt;...&lt;/think&gt;</code> step-by-step reasoning blocks and <code>&lt;answer&gt;...&lt;/answer&gt;</code> tags, plus a $+0.15$ bonus for reasoning traces $\ge 50$ words.</li>
+<li><strong>How to Interpret</strong>: Format reward rapidly saturates near its ceiling ($+0.45\text{ to }+0.60$) within the first 30–50 steps as the model quickly memorizes the ChatML formatting structure.</li>
 </ul>
-<h4 id="panel-5-reasoning-chain-length-dynamics">Panel 5: Reasoning Chain Length Dynamics</h4>
+
+<h4 id="2-trainrewardscorrectness_rewardmean-std">2. <code>train/rewards/correctness_reward/mean</code> &amp; <code>/std</code></h4>
 <ul>
-<li><strong>What it Measures</strong>: Tracks average generated token length per response across steps.</li>
-<li><strong>How to Interpret</strong>: Shows dynamic expansion of token count from ~210 tokens up to ~950 tokens as the model spontaneously develops step-by-step Chain-of-Thought (CoT) reasoning inside <code>\lt think&gt;</code> tags.</li>
+<li><strong>What it Measures</strong>: Ground-truth correctness evaluated across exact math ($\text{MATH-Hard}$, $\text{OpenR1}$), numerical values ($\text{GSM8K}$), multiple-choice letters ($\text{ARC}$), booleans ($\text{StrategyQA}$), and code syntax ($\text{HumanEval}$, $\text{MBPP}$).</li>
+<li><strong>How to Interpret</strong>: Starts low with high variance ($\text{std} \approx 0.6\text{--}0.8$) as the model explores diverse reasoning paths, with spikes toward $+1.0$ when correct solutions are discovered.</li>
 </ul>
-<h4 id="panel-6-gradient-norm-mathinlineindex202end-stability">Panel 6: Gradient Norm $\|g\|_2$ &amp; Stability</h4>
+
+<h4 id="3-trainrewardsinstruction_rewardmean-std">3. <code>train/rewards/instruction_reward/mean</code> &amp; <code>/std</code></h4>
 <ul>
-<li><strong>What it Measures</strong>: Measures the $L_2$ norm of model parameter gradients before optimizer step execution.</li>
-<li><strong>How to Interpret</strong>: High initial gradient norms ($>4.0$) stabilize below 1.0. Gradient clipping (<code>max_grad_norm=1.0</code>) prevents destabilizing weight updates.</li>
+<li><strong>What it Measures</strong>: Evaluates exact word-count constraints and instruction following on general Alpaca prompts.</li>
+<li><strong>How to Interpret</strong>: Stays at $0.0$ during batches containing pure math or code prompts, and activates dynamically when general instruction prompts are sampled.</li>
 </ul>
+
+<h4 id="4-trainrewardslength_rewardmean-std">4. <code>train/rewards/length_reward/mean</code> &amp; <code>/std</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Applies length guard rails, awarding $+0.15$ for healthy reasoning lengths while penalizing empty generations ($<15$ words: $-0.50$) and runaway repetitive loops ($>2500$ words: $-0.25$).</li>
+<li><strong>How to Interpret</strong>: Stays steady near $+0.15$, confirming no degenerative loop collapse.</li>
+</ul>
+<hr />
+
+<h3 id="43-optimization-dynamics-stability">4.3 Optimization Dynamics &amp; Stability</h3>
+<h4 id="1-trainlearning_rate">1. <code>train/learning_rate</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Learning rate schedule displaying linear warmup from $0$ to $5 \times 10^{-6}$ over the first 30 steps (5% warmup), followed by smooth cosine decay toward zero.</li>
+</ul>
+
+<h4 id="2-traingrad_norm">2. <code>train/grad_norm</code> (Gradient $L_2$ Magnitude)</h4>
+<ul>
+<li><strong>What it Measures</strong>: The $L_2$ norm of backpropagated policy gradients across LoRA matrices $A$ and $B$.</li>
+<li><strong>How to Interpret</strong>: Stays between $0.1$ and $0.6$. Occasional spikes are bounded by gradient clipping (<code>max_grad_norm=1.0</code>), preventing catastrophic weight corruption.</li>
+</ul>
+
+<h4 id="3-trainkl-kullback-leibler-divergence">3. <code>train/kl</code> (Kullback-Leibler Divergence)</h4>
+<ul>
+<li><strong>What it Measures</strong>: Divergence between the active policy $\pi_\theta$ and the reference model $\pi_{\text{ref}}$.</li>
+<li><strong>How to Interpret</strong>: Under the DAPO formulation (<code>beta = 0.0</code>), explicit KL calculation is bypassed to save compute, while asymmetric probability clipping ($\epsilon_{\text{low}}=0.2, \epsilon_{\text{high}}=0.28$) guarantees policy stability.</li>
+</ul>
+
+<h4 id="4-trainnum_tokens-trainepoch">4. <code>train/num_tokens</code> &amp; <code>train/epoch</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Cumulative tokens processed across all rollouts (climbing past 150k+ tokens) and overall dataset epoch progress.</li>
+</ul>
+<hr />
+
+<h3 id="44-rollout-length-dynamics-token-statistics">4.4 Rollout Length Dynamics &amp; Token Statistics</h3>
+<h4 id="1-traincompletion_length-mean_length">1. <code>train/completion_length</code> &amp; <code>train/completions/mean_length</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Average token length of generated reasoning chains and answers.</li>
+<li><strong>How to Interpret</strong>: Fluctuates between 300 and 500 tokens. As the model learns that deeper reasoning yields higher accuracy rewards, completion length organically expands.</li>
+</ul>
+
+<h4 id="2-traincompletionsmin_length-max_length">2. <code>train/completions/min_length</code> &amp; <code>max_length</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: The minimum and maximum token lengths within each sampled generation batch.</li>
+</ul>
+
+<h4 id="3-traincompletionsmin_terminated_length-max_terminated_length">3. <code>train/completions/min_terminated_length</code> &amp; <code>max_terminated_length</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Length distribution of rollouts that reached a natural <code>&lt;|im_end|&gt;</code> end-of-sequence token.</li>
+</ul>
+
+<h4 id="4-traincompletionsclipped_ratio">4. <code>train/completions/clipped_ratio</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: Fraction of rollouts that reached the hard generation ceiling (<code>max_completion_length = 512</code>) without emitting an EOS token. A lower ratio ($<0.3$) indicates healthy, concise reasoning convergence.</li>
+</ul>
+<hr />
+
+<h3 id="45-ppo-dapo-policy-ratio-clipping-bounds">4.5 PPO / DAPO Policy Ratio Clipping Bounds</h3>
+<h4 id="1-trainclip_ratio-bounds">1. <code>train/clip_ratio/*</code> (<code>low_min</code>, <code>low_mean</code>, <code>high_mean</code>, <code>high_max</code>, <code>region_mean</code>)</h4>
+<ul>
+<li><strong>What it Measures</strong>: Fraction of token probability ratios $r_{i,t}(\theta) = \frac{\pi_\theta}{\pi_{\theta_{\text{old}}}}$ exceeding the lower ($1 - \epsilon_{\text{low}} = 0.80$) or upper ($1 + \epsilon_{\text{high}} = 1.28$) clipping thresholds.</li>
+<li><strong>How to Interpret</strong>: Values remaining near zero confirm that policy updates are smooth and well-regularized.</li>
+</ul>
+
+<h4 id="2-trainfrac_reward_zero_std">2. <code>train/frac_reward_zero_std</code></h4>
+<ul>
+<li><strong>What it Measures</strong>: The proportion of prompt groups where all sampled completions received identical reward scores ($\sigma = 0$). When this occurs, advantage is zero ($A_i = 0$), preventing noisy updates on ambiguous or universally failed prompts.</li>
+</ul>
+
 <hr />
 <h2 id="5-offline-distillation-loss-function-deep-dive">5. Offline Distillation &amp; Loss Function Deep-Dive</h2>
 <h3 id="51-offline-distillation-mechanics">5.1 Offline Distillation Mechanics</h3>
